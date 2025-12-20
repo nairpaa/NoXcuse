@@ -1,4 +1,4 @@
-# NoExcuse
+# NoXcuse
 
 **No excuse. Or fail.**
 
