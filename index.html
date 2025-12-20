@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoExcuse</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        body { background-color: #1a1a1a; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #404040; border-radius: 4px; }
+        button, input { transition: all 0.2s ease; }
+        input:focus { outline: none; border-color: #60a5fa; }
+        .drag-handle { cursor: grab; }
+        .drag-handle:active { cursor: grabbing; }
+        .sortable-ghost { opacity: 0.4; background-color: #1e3a8a; }
+    </style>
+</head>
+<body class="text-gray-200 min-h-screen p-6 md:p-8">
+    <div class="max-w-3xl mx-auto">
+        
+        <header class="mb-12">
+            <h1 class="text-3xl font-bold mb-2 text-white">NoExcuse</h1>
+            <p class="text-gray-500 text-sm">No excuse. Or fail.</p>
+        </header>
+
+        <!-- Backlog Toggle Button (fixed on right) -->
+        <button id="backlogToggle" class="fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 transition-all">
+            <i class="fas fa-bars text-gray-400"></i>
+        </button>
+
+        <!-- Backlog Sidebar -->
+        <div id="backlogSidebar" class="fixed top-0 right-0 h-full w-[400px] bg-neutral-900 border-l border-neutral-800 transform translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
+            <div class="p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold text-white">Backlog</h2>
+                    <button id="closeBacklog" class="text-gray-500 hover:text-gray-300">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Add Backlog Input -->
+                <div class="mb-6">
+                    <div class="flex gap-2">
+                        <input 
+                            type="text" 
+                            id="backlogInput" 
+                            placeholder="Add to backlog..." 
+                            class="flex-1 bg-neutral-800 border border-neutral-700 px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm"
+                        />
+                        <button id="addBacklogBtn" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Backlog List -->
+                <div id="backlogList" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- Overlay when sidebar is open -->
+        <div id="backlogOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
+
+        <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-8 mb-8">
+            <div class="text-center">
+                <div id="timer" class="mono text-6xl font-semibold mb-8 text-white">25:00</div>
+                
+                <!-- Timer Controls (during pomodoro) -->
+                <div id="timerControls" class="flex gap-3 justify-center mb-6">
+                    <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2.5 rounded-md text-sm font-medium">Start</button>
+                    <button id="stopBtn" class="bg-neutral-800 px-6 py-2.5 rounded-md text-sm font-medium opacity-50" disabled>Stop</button>
+                    <button id="resetBtn" class="bg-neutral-800 hover:bg-neutral-700 px-6 py-2.5 rounded-md text-sm font-medium">Reset</button>
+                </div>
+
+                <!-- Break Buttons (shown after pomodoro complete) -->
+                <div id="breakButtons" class="gap-3 justify-center mb-6" style="display: none;">
+                    <button id="break5Btn" class="bg-green-600 hover:bg-green-700 px-6 py-2.5 rounded-md text-sm font-medium">Break 5 min</button>
+                    <button id="break15Btn" class="bg-purple-600 hover:bg-purple-700 px-6 py-2.5 rounded-md text-sm font-medium">Break 15 min</button>
+                    <button id="skipBreakBtn" class="bg-neutral-700 hover:bg-neutral-600 px-6 py-2.5 rounded-md text-sm font-medium">Skip Break</button>
+                </div>
+
+                <!-- Cancel Break Button (shown during break) -->
+                <div id="cancelBreakContainer" class="flex gap-3 justify-center mb-6" style="display: none;">
+                    <button id="cancelBreakBtn" class="bg-yellow-500 hover:bg-yellow-400 px-8 py-2.5 rounded-md text-sm font-medium text-gray-900 hover:text-black">Cancel Break</button>
+                </div>
+
+                <div id="sessions" class="flex gap-2 justify-center flex-wrap max-w-md mx-auto"></div>
+            </div>
+        </div>
+
+        <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-5 mb-8">
+            <div class="flex gap-3">
+                <input type="text" id="taskInput" placeholder="Add new task..." 
+                    class="flex-1 bg-neutral-800 border border-neutral-700 px-4 py-2.5 rounded-md text-gray-200 placeholder-gray-500 text-sm"/>
+                <button id="addTaskBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2.5 rounded-md text-sm font-medium">Add</button>
+            </div>
+        </div>
+
+        <div id="taskList"></div>
+    </div>
+
+    <script>
+        // State
+        let tasks = JSON.parse(localStorage.getItem('noexcuse_tasks')) || [];
+        let backlog = JSON.parse(localStorage.getItem('noexcuse_backlog')) || [];
+        let currentTaskId = null;
+        let timerInterval = null;
+        let timeLeft = 25 * 60;
+        let isRunning = false;
+        let currentSessions = 0;
+        let isBreak = false;
+        let collapsedTasks = new Set();
+        let collapsedBacklog = new Set();
+
+        // DOM
+        const timerDisplay = document.getElementById('timer');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const timerControls = document.getElementById('timerControls');
+        const breakButtons = document.getElementById('breakButtons');
+        const break5Btn = document.getElementById('break5Btn');
+        const break15Btn = document.getElementById('break15Btn');
+        const skipBreakBtn = document.getElementById('skipBreakBtn');
+        const cancelBreakContainer = document.getElementById('cancelBreakContainer');
+        const cancelBreakBtn = document.getElementById('cancelBreakBtn');
+        const taskInput = document.getElementById('taskInput');
+        const addTaskBtn = document.getElementById('addTaskBtn');
+        const taskList = document.getElementById('taskList');
+        const sessionsDisplay = document.getElementById('sessions');
+        
+        // Backlog elements
+        const backlogToggle = document.getElementById('backlogToggle');
+        const backlogSidebar = document.getElementById('backlogSidebar');
+        const closeBacklog = document.getElementById('closeBacklog');
+        const backlogOverlay = document.getElementById('backlogOverlay');
+        const backlogInput = document.getElementById('backlogInput');
+        const addBacklogBtn = document.getElementById('addBacklogBtn');
+        const backlogList = document.getElementById('backlogList');
+
+        // Helpers
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        function saveTasks() {
+            localStorage.setItem('noexcuse_tasks', JSON.stringify(tasks));
+        }
+
+        function saveBacklog() {
+            localStorage.setItem('noexcuse_backlog', JSON.stringify(backlog));
+        }
+
+        function toggleBacklogSidebar() {
+            const isOpen = !backlogSidebar.classList.contains('translate-x-full');
+            
+            if (isOpen) {
+                // Close
+                backlogSidebar.classList.add('translate-x-full');
+                backlogOverlay.classList.add('hidden');
+                backlogToggle.innerHTML = '<i class="fas fa-bars text-gray-400"></i>';
+            } else {
+                // Open
+                backlogSidebar.classList.remove('translate-x-full');
+                backlogOverlay.classList.remove('hidden');
+                backlogToggle.innerHTML = '<i class="fas fa-times text-gray-400"></i>';
+            }
+        }
+
+        function addBacklogItem(text, parentId = null) {
+            if (!text.trim()) return;
+            
+            const item = {
+                id: generateId(),
+                text: text.trim(),
+                subtasks: [],
+                parentId: parentId
+            };
+            
+            if (parentId) {
+                const parentItem = backlog.find(b => b.id === parentId);
+                if (parentItem) {
+                    parentItem.subtasks.push(item);
+                }
+            } else {
+                backlog.push(item);
+            }
+            
+            saveBacklog();
+            renderBacklog();
+        }
+
+        function deleteBacklogItem(id) {
+            function removeFromArray(arr) {
+                for (let i = 0; i < arr.length; i++) {
+                    if (arr[i].id === id) {
+                        arr.splice(i, 1);
+                        return true;
+                    }
+                    if (arr[i].subtasks && arr[i].subtasks.length > 0) {
+                        if (removeFromArray(arr[i].subtasks)) return true;
+                    }
+                }
+                return false;
+            }
+            
+            removeFromArray(backlog);
+            saveBacklog();
+            renderBacklog();
+        }
+
+        function moveToTasks(id) {
+            const item = findBacklogItem(id);
+            if (!item) return;
+            
+            // Add to tasks with all subtasks
+            const newTask = {
+                id: generateId(),
+                text: item.text,
+                completed: false,
+                subtasks: item.subtasks.map(sub => ({
+                    id: generateId(),
+                    text: sub.text,
+                    completed: false,
+                    subtasks: [],
+                    sessions: 0,
+                    parentId: null
+                })),
+                sessions: 0
+            };
+            
+            tasks.push(newTask);
+            saveTasks();
+            renderTasks();
+            
+            // Remove from backlog
+            deleteBacklogItem(id);
+        }
+
+        function moveTaskToBacklog(id) {
+            const task = findTask(id);
+            if (!task) return;
+            
+            // Add to backlog with all subtasks
+            const newBacklogItem = {
+                id: generateId(),
+                text: task.text,
+                subtasks: task.subtasks.map(sub => ({
+                    id: generateId(),
+                    text: sub.text,
+                    subtasks: [],
+                    parentId: null
+                }))
+            };
+            
+            backlog.push(newBacklogItem);
+            saveBacklog();
+            renderBacklog();
+            
+            // Remove from tasks
+            deleteTask(id);
+        }
+
+        function findBacklogItem(id, itemArray = backlog) {
+            for (let item of itemArray) {
+                if (item.id === id) return item;
+                if (item.subtasks && item.subtasks.length > 0) {
+                    const found = findBacklogItem(id, item.subtasks);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function findTask(id, taskArray = tasks) {
+            for (let task of taskArray) {
+                if (task.id === id) return task;
+                if (task.subtasks.length > 0) {
+                    const found = findTask(id, task.subtasks);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function addTask(text, parentId = null) {
+            if (!text.trim()) return;
+            
+            const task = {
+                id: generateId(),
+                text: text.trim(),
+                completed: false,
+                subtasks: [],
+                sessions: 0,
+                parentId: parentId
+            };
+
+            if (parentId) {
+                const parentTask = findTask(parentId);
+                if (parentTask) parentTask.subtasks.push(task);
+            } else {
+                tasks.push(task);
+            }
+
+            saveTasks();
+            renderTasks();
+        }
+
+        function deleteTask(id) {
+            function removeFromArray(arr) {
+                for (let i = 0; i < arr.length; i++) {
+                    if (arr[i].id === id) {
+                        arr.splice(i, 1);
+                        return true;
+                    }
+                    if (arr[i].subtasks.length > 0) {
+                        if (removeFromArray(arr[i].subtasks)) return true;
+                    }
+                }
+                return false;
+            }
+            
+            removeFromArray(tasks);
+            saveTasks();
+            renderTasks();
+        }
+
+        function toggleTask(id) {
+            const task = findTask(id);
+            if (task) {
+                task.completed = !task.completed;
+                
+                // If this is a main task with subtasks, toggle all subtasks too
+                if (task.subtasks && task.subtasks.length > 0) {
+                    task.subtasks.forEach(subtask => {
+                        subtask.completed = task.completed;
+                    });
+                }
+                
+                saveTasks();
+                renderTasks();
+            }
+        }
+
+        function toggleCollapse(taskId) {
+            if (collapsedTasks.has(taskId)) {
+                collapsedTasks.delete(taskId);
+            } else {
+                collapsedTasks.add(taskId);
+            }
+            renderTasks();
+        }
+
+        // Timer
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updateTimerDisplay() {
+            timerDisplay.textContent = formatTime(timeLeft);
+        }
+
+        function startTimer() {
+            if (isRunning) return;
+            
+            isRunning = true;
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            stopBtn.disabled = false;
+            stopBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-neutral-800', 'hover:bg-neutral-700');
+            stopBtn.classList.add('bg-rose-500', 'hover:bg-rose-400', 'text-white');
+
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                updateTimerDisplay();
+
+                if (timeLeft <= 0) {
+                    stopTimer();
+                    handleTimerComplete();
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            isRunning = false;
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            stopBtn.disabled = true;
+            stopBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-neutral-800', 'hover:bg-neutral-700');
+            stopBtn.classList.remove('bg-rose-500', 'hover:bg-rose-400', 'text-white');
+            clearInterval(timerInterval);
+        }
+
+        function resetTimer() {
+            stopTimer();
+            timeLeft = 25 * 60;
+            updateTimerDisplay();
+            isBreak = false;
+            
+            // Show timer controls, hide all break buttons
+            timerControls.style.display = 'flex';
+            breakButtons.style.display = 'none';
+            cancelBreakContainer.style.display = 'none';
+        }
+
+        function handleTimerComplete() {
+            if (!isBreak) {
+                // Pomodoro complete
+                currentSessions++;
+                updateSessionsDisplay();
+                
+                // Show break buttons, hide timer controls
+                timerControls.style.display = 'none';
+                breakButtons.style.display = 'flex';
+                
+                alert('Pomodoro complete! Take a break.');
+            } else {
+                // Break complete
+                alert('Break complete! Ready for next pomodoro.');
+                timeLeft = 25 * 60;
+                isBreak = false;
+                
+                // Show timer controls, hide cancel break button
+                cancelBreakContainer.style.display = 'none';
+                timerControls.style.display = 'flex';
+                
+                updateTimerDisplay();
+            }
+        }
+
+        function startBreak(minutes) {
+            timeLeft = minutes * 60;
+            isBreak = true;
+            updateTimerDisplay();
+            
+            // Hide break buttons and timer controls, show cancel break button
+            breakButtons.style.display = 'none';
+            timerControls.style.display = 'none';
+            cancelBreakContainer.style.display = 'flex';
+            
+            // Auto start break timer
+            startTimer();
+        }
+
+        function cancelBreak() {
+            stopTimer();
+            timeLeft = 25 * 60;
+            isBreak = false;
+            updateTimerDisplay();
+            
+            // Hide cancel break button, show timer controls
+            cancelBreakContainer.style.display = 'none';
+            timerControls.style.display = 'flex';
+        }
+
+        function skipBreak() {
+            timeLeft = 25 * 60;
+            isBreak = false;
+            updateTimerDisplay();
+            
+            // Hide break buttons, show timer controls
+            breakButtons.style.display = 'none';
+            timerControls.style.display = 'flex';
+        }
+
+
+        function updateSessionsDisplay() {
+            sessionsDisplay.innerHTML = '';
+            
+            // Show at least 16 dots (normal working hours)
+            // If overtime (>16), show all completed sessions
+            const totalDotsToShow = Math.max(16, currentSessions);
+            
+            for (let i = 0; i < totalDotsToShow; i++) {
+                const dot = document.createElement('div');
+                
+                if (i < currentSessions) {
+                    // Completed sessions
+                    if (i < 16) {
+                        // Normal sessions (1-16): green
+                        dot.className = 'w-2 h-2 rounded-full bg-green-500';
+                    } else {
+                        // Overtime sessions (17+): rose (pastel red - soft but saturated)
+                        dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                    }
+                } else {
+                    // Incomplete sessions: gray
+                    dot.className = 'w-2 h-2 rounded-full bg-neutral-700';
+                }
+                
+                sessionsDisplay.appendChild(dot);
+            }
+        }
+
+        // Render Backlog
+        function renderBacklog() {
+            backlogList.innerHTML = '';
+            backlog.forEach(item => {
+                const isCollapsed = collapsedBacklog.has(item.id);
+                
+                // Add main item
+                backlogList.appendChild(createBacklogElement(item, false, isCollapsed));
+                
+                // Add subtasks
+                if (item.subtasks && item.subtasks.length > 0 && !isCollapsed) {
+                    item.subtasks.forEach((subitem, index) => {
+                        const isLast = index === item.subtasks.length - 1;
+                        backlogList.appendChild(createBacklogElement(subitem, true, false, item.id, isLast));
+                    });
+                }
+            });
+            
+            // Initialize sortable for backlog
+            new Sortable(backlogList, {
+                animation: 150,
+                handle: '.backlog-drag-handle',
+                sort: true,
+                filter: '.backlog-subtask',
+                onEnd: function(evt) {
+                    // Reorder backlog (main items only)
+                    const items = Array.from(backlogList.querySelectorAll('[data-id]'));
+                    const seenItems = new Set();
+                    const newOrder = [];
+                    
+                    items.forEach(el => {
+                        const id = el.getAttribute('data-id');
+                        const item = backlog.find(b => b.id === id);
+                        
+                        if (item && !seenItems.has(item.id)) {
+                            seenItems.add(item.id);
+                            newOrder.push(item);
+                        }
+                    });
+                    
+                    backlog = newOrder;
+                    saveBacklog();
+                }
+            });
+        }
+
+        function toggleBacklogCollapse(itemId) {
+            if (collapsedBacklog.has(itemId)) {
+                collapsedBacklog.delete(itemId);
+            } else {
+                collapsedBacklog.add(itemId);
+            }
+            renderBacklog();
+        }
+
+        function createBacklogElement(item, isSubitem = false, isCollapsed = false, parentId = null, isLast = false) {
+            const div = document.createElement('div');
+            
+            const subtaskClass = isSubitem 
+                ? (isLast ? 'backlog-subtask border-l-2 border-neutral-700 ml-6 mt-2 mb-10 pl-4' : 'backlog-subtask border-l-2 border-neutral-700 ml-6 mt-2 mb-2 pl-4')
+                : 'mb-2';
+            
+            div.className = `bg-neutral-800 border border-neutral-700 rounded-lg p-3 hover:border-neutral-600 ${subtaskClass}`;
+            div.setAttribute('data-id', item.id);
+            
+            const content = document.createElement('div');
+            content.className = 'flex items-center gap-3';
+            
+            // Drag handle
+            const dragHandle = document.createElement('div');
+            dragHandle.className = 'backlog-drag-handle text-gray-500 hover:text-gray-300 text-sm cursor-grab';
+            dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+            
+            content.appendChild(dragHandle);
+            
+            // Text
+            const text = document.createElement('span');
+            text.className = 'flex-1 text-gray-300 text-sm cursor-text hover:text-white outline-none';
+            text.contentEditable = 'true';
+            text.textContent = item.text;
+            text.setAttribute('spellcheck', 'false');
+            
+            text.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    text.blur();
+                }
+            });
+            
+            text.addEventListener('blur', () => {
+                const newText = text.textContent.trim();
+                if (newText && newText !== item.text) {
+                    item.text = newText;
+                    saveBacklog();
+                } else if (!newText) {
+                    text.textContent = item.text;
+                }
+            });
+            
+            content.appendChild(text);
+            
+            // Expand/collapse button (for items with subtasks) - ON THE RIGHT
+            if (!isSubitem && item.subtasks && item.subtasks.length > 0) {
+                const expandBtn = document.createElement('button');
+                expandBtn.className = 'w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-300';
+                expandBtn.innerHTML = isCollapsed ? '<i class="fas fa-chevron-right"></i>' : '<i class="fas fa-chevron-down"></i>';
+                expandBtn.onclick = () => toggleBacklogCollapse(item.id);
+                content.appendChild(expandBtn);
+            } else if (!isSubitem) {
+                const spacer = document.createElement('div');
+                spacer.className = 'w-6';
+                content.appendChild(spacer);
+            }
+            
+            // Move to tasks button
+            const moveBtn = document.createElement('button');
+            moveBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs';
+            moveBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
+            moveBtn.title = 'Move to tasks';
+            moveBtn.onclick = () => moveToTasks(item.id);
+            
+            // Delete button
+            const delBtn = document.createElement('button');
+            delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2 py-1 rounded text-white text-xs';
+            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delBtn.onclick = () => deleteBacklogItem(item.id);
+            
+            content.appendChild(moveBtn);
+            content.appendChild(delBtn);
+            div.appendChild(content);
+            
+            // Add sub-item button (only for main items)
+            if (!isSubitem) {
+                const subInputContainer = document.createElement('div');
+                subInputContainer.className = 'flex gap-2 mt-3';
+                subInputContainer.style.display = 'none';
+                
+                const subInput = document.createElement('input');
+                subInput.type = 'text';
+                subInput.placeholder = 'Enter sub-item...';
+                subInput.className = 'flex-1 bg-neutral-700 border border-neutral-600 px-3 py-1.5 rounded-md text-gray-200 placeholder-gray-500 text-sm';
+                
+                const addSubBtn = document.createElement('button');
+                addSubBtn.textContent = 'Add';
+                addSubBtn.className = 'bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-md text-xs font-medium';
+                addSubBtn.onclick = () => {
+                    if (subInput.value.trim()) {
+                        addBacklogItem(subInput.value, item.id);
+                        subInput.value = '';
+                        subInputContainer.style.display = 'none';
+                        if (collapsedBacklog.has(item.id)) collapsedBacklog.delete(item.id);
+                    }
+                };
+                
+                const cancelSubBtn = document.createElement('button');
+                cancelSubBtn.textContent = '×';
+                cancelSubBtn.className = 'bg-neutral-700 hover:bg-neutral-600 px-3 py-1.5 rounded-md font-medium text-lg';
+                cancelSubBtn.onclick = () => {
+                    subInput.value = '';
+                    subInputContainer.style.display = 'none';
+                };
+                
+                subInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && subInput.value.trim()) {
+                        addBacklogItem(subInput.value, item.id);
+                        subInput.value = '';
+                        subInputContainer.style.display = 'none';
+                        if (collapsedBacklog.has(item.id)) collapsedBacklog.delete(item.id);
+                    }
+                });
+                
+                subInputContainer.appendChild(subInput);
+                subInputContainer.appendChild(addSubBtn);
+                subInputContainer.appendChild(cancelSubBtn);
+                
+                const addSubItemBtn = document.createElement('button');
+                addSubItemBtn.textContent = '+ Add sub-item';
+                addSubItemBtn.className = 'text-xs text-gray-500 hover:text-gray-400 mt-2';
+                addSubItemBtn.onclick = () => {
+                    subInputContainer.style.display = 'flex';
+                    subInput.focus();
+                };
+                
+                div.appendChild(addSubItemBtn);
+                div.appendChild(subInputContainer);
+            }
+            
+            return div;
+        }
+        function renderTasks() {
+            taskList.innerHTML = '';
+            tasks.forEach(task => {
+                const isCollapsed = collapsedTasks.has(task.id);
+                
+                // Create container for main task + its subtasks
+                const taskContainer = document.createElement('div');
+                taskContainer.className = 'task-container mb-2';
+                taskContainer.setAttribute('data-id', task.id);
+                
+                // Add main task
+                const mainTaskElement = createTaskElement(task, false, isCollapsed);
+                mainTaskElement.classList.remove('mb-2'); // Remove margin from main task
+                taskContainer.appendChild(mainTaskElement);
+                
+                // Add subtasks inside a subtasks container
+                if (task.subtasks && task.subtasks.length > 0 && !isCollapsed) {
+                    const subtasksContainer = document.createElement('div');
+                    subtasksContainer.className = 'subtasks-container';
+                    subtasksContainer.setAttribute('data-parent-id', task.id);
+                    
+                    task.subtasks.forEach((subtask, index) => {
+                        const isLast = index === task.subtasks.length - 1;
+                        const subtaskElement = createTaskElement(subtask, true, false, task.id, isLast);
+                        subtaskElement.setAttribute('data-id', subtask.id);
+                        subtasksContainer.appendChild(subtaskElement);
+                    });
+                    
+                    taskContainer.appendChild(subtasksContainer);
+                }
+                
+                taskList.appendChild(taskContainer);
+            });
+            
+            // Initialize drag and drop
+            initSortable();
+        }
+
+        function initSortable() {
+            // Sortable for main tasks
+            new Sortable(taskList, {
+                group: {
+                    name: 'shared',
+                    pull: true,
+                    put: true
+                },
+                animation: 150,
+                handle: '.drag-handle',
+                ghostClass: 'sortable-ghost',
+                draggable: '.task-container',
+                onAdd: function(evt) {
+                    // Item dragged from backlog to tasks
+                    const id = evt.item.getAttribute('data-id');
+                    const backlogItem = findBacklogItem(id);
+                    
+                    if (backlogItem) {
+                        // Add to tasks with all subtasks
+                        const newTask = {
+                            id: generateId(),
+                            text: backlogItem.text,
+                            completed: false,
+                            subtasks: backlogItem.subtasks ? backlogItem.subtasks.map(sub => ({
+                                id: generateId(),
+                                text: sub.text,
+                                completed: false,
+                                subtasks: [],
+                                sessions: 0,
+                                parentId: null
+                            })) : [],
+                            sessions: 0
+                        };
+                        
+                        tasks.push(newTask);
+                        saveTasks();
+                        renderTasks();
+                        
+                        // Remove from backlog
+                        deleteBacklogItem(id);
+                        
+                        // Remove the cloned element
+                        evt.item.remove();
+                    }
+                },
+                onEnd: function(evt) {
+                    // Get new order from containers
+                    const containers = Array.from(taskList.querySelectorAll('.task-container'));
+                    const newOrder = [];
+                    
+                    containers.forEach(container => {
+                        const id = container.getAttribute('data-id');
+                        const task = tasks.find(t => t.id === id);
+                        if (task) {
+                            newOrder.push(task);
+                        }
+                    });
+                    
+                    tasks = newOrder;
+                    saveTasks();
+                }
+            });
+            
+            // Sortable for subtasks within each parent
+            const subtaskContainers = document.querySelectorAll('.subtasks-container');
+            subtaskContainers.forEach(container => {
+                new Sortable(container, {
+                    animation: 150,
+                    handle: '.drag-handle',
+                    ghostClass: 'sortable-ghost',
+                    onEnd: function(evt) {
+                        const parentId = container.getAttribute('data-parent-id');
+                        const parentTask = tasks.find(t => t.id === parentId);
+                        
+                        if (parentTask) {
+                            // Get new subtask order
+                            const subtaskElements = Array.from(container.children);
+                            const newSubtaskOrder = [];
+                            
+                            subtaskElements.forEach(el => {
+                                const subtaskId = el.getAttribute('data-id');
+                                const subtask = parentTask.subtasks.find(s => s.id === subtaskId);
+                                if (subtask) {
+                                    newSubtaskOrder.push(subtask);
+                                }
+                            });
+                            
+                            parentTask.subtasks = newSubtaskOrder;
+                            saveTasks();
+                        }
+                    }
+                });
+            });
+        }
+
+        function createTaskElement(task, isSubtask = false, isCollapsed = false, parentId = null, isLast = false) {
+            const div = document.createElement('div');
+            const completedClass = task.completed ? 'opacity-50' : '';
+            const subtaskClass = isSubtask 
+                ? (isLast ? 'border-l-2 border-neutral-700 ml-6 mt-2 mb-10 pl-4' : 'border-l-2 border-neutral-700 ml-6 mt-2 mb-2 pl-4')
+                : 'mb-2';
+            
+            div.className = `${completedClass} ${subtaskClass} bg-neutral-900 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700`;
+
+            const content = document.createElement('div');
+            content.className = 'grid items-center gap-3';
+            content.style.gridTemplateColumns = 'auto auto 1fr auto auto auto';
+            
+            // Drag handle (LEFT)
+            const dragHandle = document.createElement('div');
+            dragHandle.className = 'drag-handle text-gray-500 hover:text-gray-300 text-sm';
+            dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+            
+            // Checkbox
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = task.completed;
+            checkbox.className = 'w-4 h-4 cursor-pointer accent-blue-600 rounded';
+            checkbox.onchange = () => toggleTask(task.id);
+            
+            // Text (inline editable)
+            const text = document.createElement('span');
+            text.className = task.completed ? 'line-through text-gray-600 text-sm cursor-text outline-none' : 'text-gray-300 text-sm cursor-text hover:text-white outline-none';
+            text.contentEditable = 'true';
+            text.textContent = task.text;
+            text.setAttribute('spellcheck', 'false');
+            
+            // Prevent newlines
+            text.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    text.blur();
+                }
+            });
+            
+            // Save on blur
+            text.addEventListener('blur', () => {
+                const newText = text.textContent.trim();
+                if (newText && newText !== task.text) {
+                    task.text = newText;
+                    saveTasks();
+                } else if (!newText) {
+                    text.textContent = task.text; // Revert if empty
+                }
+            });
+            
+            // Right section - expand/collapse + send to backlog + trash
+            // Expand button (only for main tasks with subtasks)
+            let expandBtn;
+            if (!isSubtask && task.subtasks && task.subtasks.length > 0) {
+                expandBtn = document.createElement('button');
+                expandBtn.className = 'w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-300';
+                expandBtn.innerHTML = isCollapsed ? '<i class="fas fa-chevron-right"></i>' : '<i class="fas fa-chevron-down"></i>';
+                expandBtn.onclick = () => toggleCollapse(task.id);
+            } else {
+                // Empty div for consistent spacing
+                expandBtn = document.createElement('div');
+                expandBtn.className = 'w-0';
+            }
+            
+            // Send to Backlog button (only for main tasks)
+            let sendBacklogBtn;
+            if (!isSubtask) {
+                sendBacklogBtn = document.createElement('button');
+                sendBacklogBtn.className = 'bg-purple-600 hover:bg-purple-500 px-2 py-1.5 rounded-md text-white text-xs transition-colors';
+                sendBacklogBtn.innerHTML = '<i class="fas fa-arrow-right"></i>';
+                sendBacklogBtn.title = 'Send to Backlog';
+                sendBacklogBtn.onclick = () => moveTaskToBacklog(task.id);
+            } else {
+                sendBacklogBtn = document.createElement('div');
+                sendBacklogBtn.className = 'w-0';
+            }
+            
+            const delBtn = document.createElement('button');
+            delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2.5 py-1.5 rounded-md text-white text-xs transition-colors';
+            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delBtn.onclick = () => {
+                if (currentTaskId === task.id) {
+                    stopTimer();
+                    resetTimer();
+                    currentTaskId = null;
+                }
+                deleteTask(task.id);
+            };
+            
+            content.appendChild(dragHandle);
+            content.appendChild(checkbox);
+            content.appendChild(text);
+            content.appendChild(expandBtn);
+            content.appendChild(sendBacklogBtn);
+            content.appendChild(delBtn);
+            div.appendChild(content);
+
+            // Subtask input (only for main tasks)
+            if (!isSubtask) {
+                const inputContainer = document.createElement('div');
+                inputContainer.className = 'flex gap-2 mt-3 ml-10';
+                inputContainer.style.display = 'none';
+                
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.placeholder = 'Enter subtask...';
+                input.className = 'flex-1 bg-neutral-800 border border-neutral-700 px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm';
+                
+                const addBtn = document.createElement('button');
+                addBtn.textContent = 'Add';
+                addBtn.className = 'bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-md text-xs font-medium';
+                addBtn.onclick = () => {
+                    if (input.value.trim()) {
+                        addTask(input.value, task.id);
+                        input.value = '';
+                        inputContainer.style.display = 'none';
+                        if (collapsedTasks.has(task.id)) collapsedTasks.delete(task.id);
+                    }
+                };
+                
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '×';
+                cancelBtn.className = 'bg-neutral-800 hover:bg-neutral-700 px-3 py-2 rounded-md font-medium';
+                cancelBtn.style.fontSize = '18px';
+                cancelBtn.style.lineHeight = '1';
+                cancelBtn.onclick = () => {
+                    input.value = '';
+                    inputContainer.style.display = 'none';
+                };
+                
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && input.value.trim()) {
+                        addTask(input.value, task.id);
+                        input.value = '';
+                        inputContainer.style.display = 'none';
+                        if (collapsedTasks.has(task.id)) collapsedTasks.delete(task.id);
+                    }
+                });
+                
+                inputContainer.appendChild(input);
+                inputContainer.appendChild(addBtn);
+                inputContainer.appendChild(cancelBtn);
+                
+                const addSubBtn = document.createElement('button');
+                addSubBtn.textContent = '+ Add subtask';
+                addSubBtn.className = 'text-xs text-gray-500 hover:text-gray-400 ml-10 mt-2';
+                addSubBtn.onclick = () => {
+                    inputContainer.style.display = 'flex';
+                    input.focus();
+                };
+                
+                div.appendChild(addSubBtn);
+                div.appendChild(inputContainer);
+            }
+
+            return div;
+        }
+
+        // Events
+        addTaskBtn.addEventListener('click', () => {
+            addTask(taskInput.value);
+            taskInput.value = '';
+        });
+
+        taskInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addTask(taskInput.value);
+                taskInput.value = '';
+            }
+        });
+
+        startBtn.addEventListener('click', startTimer);
+        stopBtn.addEventListener('click', stopTimer);
+        resetBtn.addEventListener('click', resetTimer);
+        
+        break5Btn.addEventListener('click', () => startBreak(5));
+        break15Btn.addEventListener('click', () => startBreak(15));
+        skipBreakBtn.addEventListener('click', skipBreak);
+        cancelBreakBtn.addEventListener('click', cancelBreak);
+
+        // Backlog events
+        backlogToggle.addEventListener('click', toggleBacklogSidebar);
+        closeBacklog.addEventListener('click', toggleBacklogSidebar);
+        backlogOverlay.addEventListener('click', toggleBacklogSidebar);
+
+        addBacklogBtn.addEventListener('click', () => {
+            addBacklogItem(backlogInput.value);
+            backlogInput.value = '';
+        });
+
+        backlogInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addBacklogItem(backlogInput.value);
+                backlogInput.value = '';
+            }
+        });
+
+        // Init
+        renderTasks();
+        renderBacklog();
+        updateTimerDisplay();
+        updateSessionsDisplay();
+    </script>
+</body>
+</html>
