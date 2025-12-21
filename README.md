@@ -24,10 +24,6 @@ Simple Pomodoro timer with task management. No fluff, just work.
 git clone https://github.com/nairpaa/noxcuse.git
 cd noxcuse
 
-# Add assets
-cp /path/to/bell-notification.mp3 assets/audio/
-cp /path/to/NoXcuse.png assets/icons/
-
 # Build CSS (requires Tailwind CLI)
 ./tailwindcss -i css/input.css -o css/output.css --minify
 
