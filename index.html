@@ -68,6 +68,28 @@
         <!-- Overlay when sidebar is open -->
         <div id="backlogOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
 
+        <!-- Custom Notification Modal -->
+        <div id="notificationModal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
+            <div class="bg-black/60 absolute inset-0"></div>
+            <div class="bg-neutral-900 border-2 border-neutral-700 rounded-xl p-8 max-w-md w-full mx-4 relative z-10 shadow-2xl">
+                <div class="text-center">
+                    <div id="notificationIcon" class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center">
+                        <i class="fas fa-bell text-3xl"></i>
+                    </div>
+                    <h3 id="notificationTitle" class="text-2xl font-bold mb-3 text-white"></h3>
+                    <p id="notificationMessage" class="text-gray-400 mb-6"></p>
+                    <button id="notificationClose" class="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg text-sm font-medium w-full transition-colors">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio element -->
+        <audio id="notificationSound" preload="auto">
+            <source src="bell-notification.mp3" type="audio/mpeg">
+        </audio>
+
         <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-8 mb-8">
             <div class="text-center">
                 <div id="timer" class="mono text-6xl font-semibold mb-8 text-white">25:00</div>
@@ -112,7 +134,7 @@
         let backlog = JSON.parse(localStorage.getItem('noxcuse_backlog')) || [];
         let currentTaskId = null;
         let timerInterval = null;
-        let timeLeft = 1 * 5;
+        let timeLeft = 25 * 60;
         let isRunning = false;
         let currentSessions = 0;
         let isBreak = false;
@@ -144,6 +166,14 @@
         const backlogInput = document.getElementById('backlogInput');
         const addBacklogBtn = document.getElementById('addBacklogBtn');
         const backlogList = document.getElementById('backlogList');
+
+        // Notification elements
+        const notificationModal = document.getElementById('notificationModal');
+        const notificationIcon = document.getElementById('notificationIcon');
+        const notificationTitle = document.getElementById('notificationTitle');
+        const notificationMessage = document.getElementById('notificationMessage');
+        const notificationClose = document.getElementById('notificationClose');
+        const notificationSound = document.getElementById('notificationSound');
 
         // Helpers
         function generateId() {
@@ -198,6 +228,26 @@
             data.currentSessions = currentSessions;
             
             localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
+        }
+
+        // Custom notification
+        function showNotification(title, message, iconClass = 'fa-bell', iconColor = 'bg-blue-600') {
+            // Play sound
+            notificationSound.currentTime = 0;
+            notificationSound.play().catch(err => console.log('Audio play failed:', err));
+            
+            // Update notification content
+            notificationTitle.textContent = title;
+            notificationMessage.textContent = message;
+            notificationIcon.className = `w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${iconColor}`;
+            notificationIcon.querySelector('i').className = `fas ${iconClass} text-3xl text-white`;
+            
+            // Show modal
+            notificationModal.classList.remove('hidden');
+        }
+
+        function hideNotification() {
+            notificationModal.classList.add('hidden');
         }
 
         function toggleBacklogSidebar() {
@@ -449,7 +499,7 @@
 
         function resetTimer() {
             stopTimer();
-            timeLeft = 1 * 5;
+            timeLeft = 25 * 60;
             updateTimerDisplay();
             isBreak = false;
             
@@ -470,11 +520,15 @@
                 timerControls.style.display = 'none';
                 breakButtons.style.display = 'flex';
                 
-                alert('Pomodoro complete! Take a break.');
+                showNotification(
+                    'Pomodoro Complete!',
+                    'Great work! Time to take a break.',
+                    'fa-check-circle',
+                    'bg-green-600'
+                );
             } else {
                 // Break complete
-                alert('Break complete! Ready for next pomodoro.');
-                timeLeft = 1 * 5;
+                timeLeft = 25 * 60;
                 isBreak = false;
                 
                 // Show timer controls, hide cancel break button
@@ -482,6 +536,13 @@
                 timerControls.style.display = 'flex';
                 
                 updateTimerDisplay();
+                
+                showNotification(
+                    'Break Complete!',
+                    'Ready for the next pomodoro session?',
+                    'fa-play-circle',
+                    'bg-blue-600'
+                );
             }
         }
 
@@ -501,7 +562,7 @@
 
         function cancelBreak() {
             stopTimer();
-            timeLeft = 1 * 5;
+            timeLeft = 25 * 60;
             isBreak = false;
             updateTimerDisplay();
             
@@ -511,7 +572,7 @@
         }
 
         function skipBreak() {
-            timeLeft = 1 * 5;
+            timeLeft = 25 * 60;
             isBreak = false;
             updateTimerDisplay();
             
@@ -1064,6 +1125,22 @@
             if (e.key === 'Enter') {
                 addBacklogItem(backlogInput.value);
                 backlogInput.value = '';
+            }
+        });
+
+        // Notification events
+        notificationClose.addEventListener('click', hideNotification);
+        notificationModal.addEventListener('click', (e) => {
+            // Close if clicking outside the modal content
+            if (e.target === notificationModal || e.target.classList.contains('bg-black/60')) {
+                hideNotification();
+            }
+        });
+
+        // Keyboard support - ESC to close notification
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !notificationModal.classList.contains('hidden')) {
+                hideNotification();
             }
         });
 
