@@ -53,6 +53,15 @@ const dateDetails = document.getElementById('dateDetails');
 const selectedDate = document.getElementById('selectedDate');
 const sessionCount = document.getElementById('sessionCount');
 const sessionDots = document.getElementById('sessionDots');
+const dateTasksSection = document.getElementById('dateTasksSection');
+const dateTasks = document.getElementById('dateTasks');
+
+// Archive elements
+const archiveToggle = document.getElementById('archiveToggle');
+const archiveSidebar = document.getElementById('archiveSidebar');
+const closeArchive = document.getElementById('closeArchive');
+const archiveOverlay = document.getElementById('archiveOverlay');
+const archiveList = document.getElementById('archiveList');
 
 // Notification elements
 const notificationModal = document.getElementById('notificationModal');
@@ -151,9 +160,12 @@ function toggleBacklogSidebar() {
         backlogOverlay.classList.remove('hidden');
         backlogToggle.classList.add('hidden'); // Hide button
         
-        // Close calendar if open
+        // Close calendar and archive if open
         if (!calendarSidebar.classList.contains('-translate-x-full')) {
             toggleCalendarSidebar();
+        }
+        if (!archiveSidebar.classList.contains('-translate-x-full')) {
+            toggleArchiveSidebar();
         }
     }
 }
@@ -165,17 +177,49 @@ function toggleCalendarSidebar() {
         // Close
         calendarSidebar.classList.add('-translate-x-full');
         calendarOverlay.classList.add('hidden');
-        calendarToggle.classList.remove('hidden'); // Show button
+        calendarToggle.classList.remove('hidden'); // Show calendar button
+        archiveToggle.classList.remove('hidden'); // Show archive button
     } else {
         // Open
         calendarSidebar.classList.remove('-translate-x-full');
         calendarOverlay.classList.remove('hidden');
-        calendarToggle.classList.add('hidden'); // Hide button
+        calendarToggle.classList.add('hidden'); // Hide calendar button
+        archiveToggle.classList.add('hidden'); // Hide archive button
         renderCalendar();
         
-        // Close backlog if open
+        // Close backlog and archive if open
         if (!backlogSidebar.classList.contains('translate-x-full')) {
             toggleBacklogSidebar();
+        }
+        if (!archiveSidebar.classList.contains('-translate-x-full')) {
+            toggleArchiveSidebar();
+        }
+    }
+}
+
+function toggleArchiveSidebar() {
+    const isOpen = !archiveSidebar.classList.contains('-translate-x-full');
+    
+    if (isOpen) {
+        // Close
+        archiveSidebar.classList.add('-translate-x-full');
+        archiveOverlay.classList.add('hidden');
+        archiveToggle.classList.remove('hidden'); // Show archive button
+        calendarToggle.classList.remove('hidden'); // Show calendar button
+    } else {
+        // Open
+        archiveSidebar.classList.remove('-translate-x-full');
+        archiveOverlay.classList.remove('hidden');
+        archiveToggle.classList.add('hidden'); // Hide archive button
+        calendarToggle.classList.add('hidden'); // Hide calendar button
+        renderArchive();
+        
+        // Close backlog and calendar if open
+        if (!backlogSidebar.classList.contains('translate-x-full')) {
+            toggleBacklogSidebar();
+        }
+        if (!calendarSidebar.classList.contains('-translate-x-full')) {
+            toggleCalendarSidebar();
         }
     }
 }
@@ -300,13 +344,187 @@ function showDateDetails(dateStr, sessions) {
         sessionDots.appendChild(dot);
     }
     
+    // Get completed tasks for this date
+    const completedTasks = getCompletedTasksForDate(dateStr);
+    
+    if (completedTasks.length > 0) {
+        dateTasks.innerHTML = '';
+        completedTasks.forEach(({task, parent}) => {
+            const taskItem = document.createElement('div');
+            taskItem.className = 'text-sm text-gray-400 flex items-center gap-2';
+            
+            // Show parent task name if this is a subtask
+            const displayText = parent 
+                ? `${parent.text} › ${task.text}` 
+                : task.text;
+            
+            taskItem.innerHTML = `
+                <i class="fas fa-check-circle text-green-500"></i>
+                <span>${displayText}</span>
+            `;
+            dateTasks.appendChild(taskItem);
+        });
+        dateTasksSection.style.display = 'block';
+    } else {
+        dateTasksSection.style.display = 'none';
+    }
+    
     dateDetails.style.display = 'block';
+}
+
+// Helper function to get completed tasks for a specific date
+function getCompletedTasksForDate(dateStr) {
+    const completedTasks = [];
+    
+    function collectCompletedTasks(taskArray, parentTask = null) {
+        taskArray.forEach(task => {
+            if (task.completed && task.completedDate === dateStr) {
+                completedTasks.push({
+                    task: task,
+                    parent: parentTask
+                });
+            }
+            // Check subtasks too
+            if (task.subtasks && task.subtasks.length > 0) {
+                collectCompletedTasks(task.subtasks, task);
+            }
+        });
+    }
+    
+    collectCompletedTasks(tasks);
+    return completedTasks;
 }
 
 function navigateMonth(direction) {
     currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
     renderCalendar();
     dateDetails.style.display = 'none';
+}
+
+// Archive functions
+function renderArchive() {
+    archiveList.innerHTML = '';
+    const today = getTodayDate();
+    
+    // Get all archived tasks (completed before today)
+    const archivedTasks = [];
+    
+    function collectArchivedTasks(taskArray, parentTask = null) {
+        taskArray.forEach(task => {
+            if (task.completed && task.completedDate && task.completedDate < today) {
+                archivedTasks.push({
+                    task: task,
+                    parent: parentTask
+                });
+            }
+            // Check subtasks
+            if (task.subtasks && task.subtasks.length > 0) {
+                collectArchivedTasks(task.subtasks, task);
+            }
+        });
+    }
+    
+    collectArchivedTasks(tasks);
+    
+    if (archivedTasks.length === 0) {
+        archiveList.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No archived tasks</p>';
+        return;
+    }
+    
+    // Group by date
+    const groupedByDate = {};
+    archivedTasks.forEach(({task, parent}) => {
+        const date = task.completedDate;
+        if (!groupedByDate[date]) {
+            groupedByDate[date] = [];
+        }
+        groupedByDate[date].push({task, parent});
+    });
+    
+    // Sort dates (newest first)
+    const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
+    
+    // Render grouped tasks
+    sortedDates.forEach(dateStr => {
+        // Date header
+        const date = new Date(dateStr + 'T00:00:00');
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const dateHeader = document.createElement('div');
+        dateHeader.className = 'text-sm font-semibold text-gray-400 mb-2 mt-4 first:mt-0';
+        dateHeader.textContent = date.toLocaleDateString('en-US', options);
+        archiveList.appendChild(dateHeader);
+        
+        // Tasks for this date
+        groupedByDate[dateStr].forEach(({task, parent}) => {
+            const taskDiv = document.createElement('div');
+            taskDiv.className = 'bg-neutral-800 border border-neutral-700 rounded-lg p-3 mb-2 hover:border-neutral-600';
+            
+            const content = document.createElement('div');
+            content.className = 'flex items-center gap-3';
+            
+            // Checkmark icon
+            const icon = document.createElement('div');
+            icon.className = 'text-green-500';
+            icon.innerHTML = '<i class="fas fa-check-circle"></i>';
+            
+            // Task text with parent info if subtask
+            const text = document.createElement('span');
+            text.className = 'flex-1 text-gray-300 text-sm';
+            
+            // Show parent task name if this is a subtask
+            if (parent) {
+                text.innerHTML = `<span class="text-gray-500">${parent.text} ›</span> ${task.text}`;
+            } else {
+                text.textContent = task.text;
+            }
+            
+            content.appendChild(icon);
+            content.appendChild(text);
+            
+            // Restore button - ONLY for main tasks (not subtasks)
+            if (!parent) {
+                const uncompleteBtn = document.createElement('button');
+                uncompleteBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs';
+                uncompleteBtn.innerHTML = '<i class="fas fa-undo"></i>';
+                uncompleteBtn.title = 'Restore to Tasks';
+                uncompleteBtn.onclick = () => uncompleteTask(task.id);
+                content.appendChild(uncompleteBtn);
+            }
+            
+            // Delete button
+            const delBtn = document.createElement('button');
+            delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2 py-1 rounded text-white text-xs';
+            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delBtn.onclick = () => {
+                deleteTask(task.id);
+                renderArchive();
+            };
+            
+            content.appendChild(delBtn);
+            taskDiv.appendChild(content);
+            archiveList.appendChild(taskDiv);
+        });
+    });
+}
+
+function uncompleteTask(taskId) {
+    const task = findTask(taskId);
+    if (task) {
+        task.completed = false;
+        task.completedDate = null;
+        
+        // Also uncomplete all subtasks
+        if (task.subtasks && task.subtasks.length > 0) {
+            task.subtasks.forEach(subtask => {
+                subtask.completed = false;
+                subtask.completedDate = null;
+            });
+        }
+        
+        saveTasks();
+        renderTasks();
+        renderArchive();
+    }
 }
 
 function addBacklogItem(text, parentId = null) {
@@ -430,6 +648,7 @@ function addTask(text, parentId = null) {
         id: generateId(),
         text: text.trim(),
         completed: false,
+        completedDate: null,
         subtasks: [],
         parentId: parentId
     };
@@ -469,10 +688,18 @@ function toggleTask(id) {
     if (task) {
         task.completed = !task.completed;
         
+        // Set completedDate when task is completed
+        if (task.completed) {
+            task.completedDate = getTodayDate();
+        } else {
+            task.completedDate = null;
+        }
+        
         // If this is a main task with subtasks, toggle all subtasks too
         if (task.subtasks && task.subtasks.length > 0) {
             task.subtasks.forEach(subtask => {
                 subtask.completed = task.completed;
+                subtask.completedDate = task.completed ? getTodayDate() : null;
             });
         }
         
@@ -844,7 +1071,14 @@ function createBacklogElement(item, isSubitem = false, isCollapsed = false, pare
 }
 function renderTasks() {
     taskList.innerHTML = '';
-    tasks.forEach(task => {
+    const today = getTodayDate();
+    
+    // Filter: show uncompleted OR completed today (hide completed from previous days)
+    const visibleTasks = tasks.filter(task => {
+        return !task.completed || task.completedDate === today;
+    });
+    
+    visibleTasks.forEach(task => {
         const isCollapsed = collapsedTasks.has(task.id);
         
         // Create container for main task + its subtasks
@@ -863,8 +1097,13 @@ function renderTasks() {
             subtasksContainer.className = 'subtasks-container';
             subtasksContainer.setAttribute('data-parent-id', task.id);
             
-            task.subtasks.forEach((subtask, index) => {
-                const isLast = index === task.subtasks.length - 1;
+            // Filter subtasks too
+            const visibleSubtasks = task.subtasks.filter(subtask => {
+                return !subtask.completed || subtask.completedDate === today;
+            });
+            
+            visibleSubtasks.forEach((subtask, index) => {
+                const isLast = index === visibleSubtasks.length - 1;
                 const subtaskElement = createTaskElement(subtask, true, false, task.id, isLast);
                 subtaskElement.setAttribute('data-id', subtask.id);
                 subtasksContainer.appendChild(subtaskElement);
@@ -1162,16 +1401,31 @@ backlogOverlay.addEventListener('click', toggleBacklogSidebar);
 // Calendar events
 calendarToggle.addEventListener('click', toggleCalendarSidebar);
 closeCalendar.addEventListener('click', toggleCalendarSidebar);
+prevMonth.addEventListener('click', () => navigateMonth(-1));
+nextMonth.addEventListener('click', () => navigateMonth(1));
+
+// Archive events
+archiveToggle.addEventListener('click', toggleArchiveSidebar);
+closeArchive.addEventListener('click', toggleArchiveSidebar);
+
+// Overlay click handler (closes any open sidebar)
 calendarOverlay.addEventListener('click', () => {
     if (!calendarSidebar.classList.contains('-translate-x-full')) {
         toggleCalendarSidebar();
     }
+});
+
+archiveOverlay.addEventListener('click', () => {
+    if (!archiveSidebar.classList.contains('-translate-x-full')) {
+        toggleArchiveSidebar();
+    }
+});
+
+backlogOverlay.addEventListener('click', () => {
     if (!backlogSidebar.classList.contains('translate-x-full')) {
         toggleBacklogSidebar();
     }
 });
-prevMonth.addEventListener('click', () => navigateMonth(-1));
-nextMonth.addEventListener('click', () => navigateMonth(1));
 
 addBacklogBtn.addEventListener('click', () => {
     addBacklogItem(backlogInput.value);
