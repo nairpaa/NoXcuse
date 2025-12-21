@@ -21,7 +21,7 @@ Simple Pomodoro timer with task management. No fluff, just work.
 **Build locally:**
 ```bash
 # Clone repo
-git clone https://github.com/yourusername/noxcuse.git
+git clone https://github.com/nairpaa/noxcuse.git
 cd noxcuse
 
 # Add assets
