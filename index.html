@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NoExcuse</title>
+    <title>NoXcuse</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -26,7 +26,7 @@
     <div class="max-w-3xl mx-auto">
         
         <header class="mb-12">
-            <h1 class="text-3xl font-bold mb-2 text-white">NoExcuse</h1>
+            <h1 class="text-3xl font-bold mb-2 text-white">NoXcuse</h1>
             <p class="text-gray-500 text-sm">No excuse. Or fail.</p>
         </header>
 
@@ -108,11 +108,11 @@
 
     <script>
         // State
-        let tasks = JSON.parse(localStorage.getItem('noexcuse_tasks')) || [];
-        let backlog = JSON.parse(localStorage.getItem('noexcuse_backlog')) || [];
+        let tasks = JSON.parse(localStorage.getItem('noxcuse_tasks')) || [];
+        let backlog = JSON.parse(localStorage.getItem('noxcuse_backlog')) || [];
         let currentTaskId = null;
         let timerInterval = null;
-        let timeLeft = 25 * 60;
+        let timeLeft = 1 * 5;
         let isRunning = false;
         let currentSessions = 0;
         let isBreak = false;
@@ -151,11 +151,53 @@
         }
 
         function saveTasks() {
-            localStorage.setItem('noexcuse_tasks', JSON.stringify(tasks));
+            localStorage.setItem('noxcuse_tasks', JSON.stringify(tasks));
         }
 
         function saveBacklog() {
-            localStorage.setItem('noexcuse_backlog', JSON.stringify(backlog));
+            localStorage.setItem('noxcuse_backlog', JSON.stringify(backlog));
+        }
+
+        // Daily session tracking
+        function getTodayDate() {
+            const today = new Date();
+            return today.toISOString().split('T')[0]; // YYYY-MM-DD
+        }
+
+        function loadDailySessions() {
+            const data = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+            const today = getTodayDate();
+            
+            // Check if day changed
+            if (data.currentDate !== today) {
+                // Save yesterday's sessions to history
+                if (data.currentDate && data.currentSessions > 0) {
+                    if (!data.history) data.history = {};
+                    data.history[data.currentDate] = data.currentSessions;
+                }
+                
+                // Reset for new day
+                data.currentDate = today;
+                data.currentSessions = 0;
+                localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
+                
+                currentSessions = 0;
+            } else {
+                // Same day, load current sessions
+                currentSessions = data.currentSessions || 0;
+            }
+            
+            return data;
+        }
+
+        function saveDailySessions() {
+            const data = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+            const today = getTodayDate();
+            
+            data.currentDate = today;
+            data.currentSessions = currentSessions;
+            
+            localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
         }
 
         function toggleBacklogSidebar() {
@@ -230,10 +272,8 @@
                     text: sub.text,
                     completed: false,
                     subtasks: [],
-                    sessions: 0,
                     parentId: null
-                })),
-                sessions: 0
+                }))
             };
             
             tasks.push(newTask);
@@ -298,7 +338,6 @@
                 text: text.trim(),
                 completed: false,
                 subtasks: [],
-                sessions: 0,
                 parentId: parentId
             };
 
@@ -366,7 +405,15 @@
         }
 
         function updateTimerDisplay() {
-            timerDisplay.textContent = formatTime(timeLeft);
+            const timeString = formatTime(timeLeft);
+            timerDisplay.textContent = timeString;
+            
+            // Update document title
+            if (isRunning) {
+                document.title = `${timeString} - NoXcuse`;
+            } else {
+                document.title = 'NoXcuse';
+            }
         }
 
         function startTimer() {
@@ -402,7 +449,7 @@
 
         function resetTimer() {
             stopTimer();
-            timeLeft = 25 * 60;
+            timeLeft = 1 * 5;
             updateTimerDisplay();
             isBreak = false;
             
@@ -416,6 +463,7 @@
             if (!isBreak) {
                 // Pomodoro complete
                 currentSessions++;
+                saveDailySessions(); // Save to localStorage
                 updateSessionsDisplay();
                 
                 // Show break buttons, hide timer controls
@@ -426,7 +474,7 @@
             } else {
                 // Break complete
                 alert('Break complete! Ready for next pomodoro.');
-                timeLeft = 25 * 60;
+                timeLeft = 1 * 5;
                 isBreak = false;
                 
                 // Show timer controls, hide cancel break button
@@ -453,7 +501,7 @@
 
         function cancelBreak() {
             stopTimer();
-            timeLeft = 25 * 60;
+            timeLeft = 1 * 5;
             isBreak = false;
             updateTimerDisplay();
             
@@ -463,7 +511,7 @@
         }
 
         function skipBreak() {
-            timeLeft = 25 * 60;
+            timeLeft = 1 * 5;
             isBreak = false;
             updateTimerDisplay();
             
@@ -756,10 +804,8 @@
                                 text: sub.text,
                                 completed: false,
                                 subtasks: [],
-                                sessions: 0,
                                 parentId: null
-                            })) : [],
-                            sessions: 0
+                            })) : []
                         };
                         
                         tasks.push(newTask);
@@ -1022,6 +1068,7 @@
         });
 
         // Init
+        loadDailySessions();
         renderTasks();
         renderBacklog();
         updateTimerDisplay();
