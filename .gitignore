@@ -1,0 +1,7 @@
+# Tailwind CLI binary
+tailwindcss
+tailwindcss-*
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/* Custom styles */
+* { 
+    font-family: 'Inter', sans-serif; 
+}
+
+.mono { 
+    font-family: 'JetBrains Mono', monospace; 
+}
+
+body { 
+    background-color: #1a1a1a; 
+}
+
+::-webkit-scrollbar { 
+    width: 8px; 
+}
+
+::-webkit-scrollbar-track { 
+    background: #1a1a1a; 
+}
+
+::-webkit-scrollbar-thumb { 
+    background: #404040; 
+    border-radius: 4px; 
+}
+
+button, input { 
+    transition: all 0.2s ease; 
+}
+
+input:focus { 
+    outline: none; 
+    border-color: #60a5fa; 
+}
+
+.drag-handle { 
+    cursor: grab; 
+}
+
+.drag-handle:active { 
+    cursor: grabbing; 
+}
+
+.sortable-ghost { 
+    opacity: 0.4; 
+    background-color: #1e3a8a; 
+}
