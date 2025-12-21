@@ -31,6 +31,62 @@
             <p class="text-gray-500 text-sm">No excuse. Or fail.</p>
         </header>
 
+        <!-- Calendar Toggle Button (fixed on left) -->
+        <button id="calendarToggle" class="fixed top-6 left-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 transition-all">
+            <i class="fas fa-calendar text-gray-400"></i>
+        </button>
+
+        <!-- Calendar Sidebar -->
+        <div id="calendarSidebar" class="fixed top-0 left-0 h-full w-[400px] bg-neutral-900 border-r border-neutral-800 transform -translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
+            <div class="p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold text-white">Session History</h2>
+                    <button id="closeCalendar" class="text-gray-500 hover:text-gray-300">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Calendar Navigation -->
+                <div class="flex items-center justify-between mb-4">
+                    <button id="prevMonth" class="text-gray-400 hover:text-white p-2">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <h3 id="currentMonth" class="text-lg font-semibold text-white"></h3>
+                    <button id="nextMonth" class="text-gray-400 hover:text-white p-2">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+
+                <!-- Calendar Grid -->
+                <div class="mb-6">
+                    <!-- Weekday headers -->
+                    <div class="grid grid-cols-7 gap-1 mb-2">
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Su</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Mo</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Tu</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">We</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Th</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Fr</div>
+                        <div class="text-center text-xs font-medium text-gray-500 py-2">Sa</div>
+                    </div>
+                    <!-- Calendar dates -->
+                    <div id="calendarDates" class="grid grid-cols-7 gap-1"></div>
+                </div>
+
+                <!-- Selected Date Details -->
+                <div id="dateDetails" class="bg-neutral-800 border border-neutral-700 rounded-lg p-4" style="display: none;">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 id="selectedDate" class="font-semibold text-white"></h4>
+                        <span id="sessionCount" class="text-sm text-gray-400"></span>
+                    </div>
+                    <div id="sessionDots" class="flex gap-1 flex-wrap"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Overlay when calendar is open -->
+        <div id="calendarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
+
         <!-- Backlog Toggle Button (fixed on right) -->
         <button id="backlogToggle" class="fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-bars text-gray-400"></i>
@@ -141,6 +197,10 @@
         let isBreak = false;
         let collapsedTasks = new Set();
         let collapsedBacklog = new Set();
+        
+        // Calendar state
+        let currentCalendarDate = new Date();
+        let selectedDateStr = null;
 
         // DOM
         const timerDisplay = document.getElementById('timer');
@@ -167,6 +227,20 @@
         const backlogInput = document.getElementById('backlogInput');
         const addBacklogBtn = document.getElementById('addBacklogBtn');
         const backlogList = document.getElementById('backlogList');
+
+        // Calendar elements
+        const calendarToggle = document.getElementById('calendarToggle');
+        const calendarSidebar = document.getElementById('calendarSidebar');
+        const closeCalendar = document.getElementById('closeCalendar');
+        const calendarOverlay = document.getElementById('calendarOverlay');
+        const prevMonth = document.getElementById('prevMonth');
+        const nextMonth = document.getElementById('nextMonth');
+        const currentMonth = document.getElementById('currentMonth');
+        const calendarDates = document.getElementById('calendarDates');
+        const dateDetails = document.getElementById('dateDetails');
+        const selectedDate = document.getElementById('selectedDate');
+        const sessionCount = document.getElementById('sessionCount');
+        const sessionDots = document.getElementById('sessionDots');
 
         // Notification elements
         const notificationModal = document.getElementById('notificationModal');
@@ -258,13 +332,169 @@
                 // Close
                 backlogSidebar.classList.add('translate-x-full');
                 backlogOverlay.classList.add('hidden');
-                backlogToggle.innerHTML = '<i class="fas fa-bars text-gray-400"></i>';
+                backlogToggle.classList.remove('hidden'); // Show button
             } else {
                 // Open
                 backlogSidebar.classList.remove('translate-x-full');
                 backlogOverlay.classList.remove('hidden');
-                backlogToggle.innerHTML = '<i class="fas fa-times text-gray-400"></i>';
+                backlogToggle.classList.add('hidden'); // Hide button
+                
+                // Close calendar if open
+                if (!calendarSidebar.classList.contains('-translate-x-full')) {
+                    toggleCalendarSidebar();
+                }
             }
+        }
+
+        function toggleCalendarSidebar() {
+            const isOpen = !calendarSidebar.classList.contains('-translate-x-full');
+            
+            if (isOpen) {
+                // Close
+                calendarSidebar.classList.add('-translate-x-full');
+                calendarOverlay.classList.add('hidden');
+                calendarToggle.classList.remove('hidden'); // Show button
+            } else {
+                // Open
+                calendarSidebar.classList.remove('-translate-x-full');
+                calendarOverlay.classList.remove('hidden');
+                calendarToggle.classList.add('hidden'); // Hide button
+                renderCalendar();
+                
+                // Close backlog if open
+                if (!backlogSidebar.classList.contains('translate-x-full')) {
+                    toggleBacklogSidebar();
+                }
+            }
+        }
+
+        function renderCalendar() {
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+            
+            // Set month/year header
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                               'July', 'August', 'September', 'October', 'November', 'December'];
+            currentMonth.textContent = `${monthNames[month]} ${year}`;
+            
+            // Get first day of month and total days
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            // Get session data
+            const sessionData = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+            const history = sessionData.history || {};
+            const today = getTodayDate();
+            
+            // Clear calendar
+            calendarDates.innerHTML = '';
+            
+            // Add empty cells for days before month starts
+            for (let i = 0; i < firstDay; i++) {
+                const emptyCell = document.createElement('div');
+                emptyCell.className = 'aspect-square';
+                calendarDates.appendChild(emptyCell);
+            }
+            
+            // Add days of month
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const sessions = dateStr === today ? sessionData.currentSessions : (history[dateStr] || 0);
+                
+                const dayCell = document.createElement('div');
+                dayCell.className = 'aspect-square flex flex-col items-center justify-center rounded-lg cursor-pointer transition-colors relative';
+                
+                // Today highlight
+                if (dateStr === today) {
+                    dayCell.classList.add('bg-blue-600/20', 'border', 'border-blue-600');
+                } else {
+                    dayCell.classList.add('hover:bg-neutral-800');
+                }
+                
+                // Day number
+                const dayNum = document.createElement('div');
+                dayNum.className = 'text-sm font-medium';
+                dayNum.textContent = day;
+                
+                // Session indicator
+                if (sessions > 0) {
+                    dayNum.classList.add('text-white');
+                    
+                    const indicator = document.createElement('div');
+                    indicator.className = 'flex gap-0.5 mt-1';
+                    
+                    // Color based on session count (check overtime FIRST!)
+                    let dotColor = 'bg-gray-600';
+                    if (sessions > 16) {
+                        dotColor = 'bg-rose-500'; // Overtime (17+)
+                    } else if (sessions === 16) {
+                        dotColor = 'bg-green-500'; // Full day (exactly 16)
+                    } else if (sessions >= 8) {
+                        dotColor = 'bg-green-400'; // Half day+ (8-15)
+                    } else if (sessions > 0) {
+                        dotColor = 'bg-green-300'; // Some work (1-7)
+                    }
+                    
+                    // Show dots (max 3)
+                    const dotCount = Math.min(3, Math.ceil(sessions / 6));
+                    for (let i = 0; i < dotCount; i++) {
+                        const dot = document.createElement('div');
+                        dot.className = `w-1 h-1 rounded-full ${dotColor}`;
+                        indicator.appendChild(dot);
+                    }
+                    
+                    dayCell.appendChild(dayNum);
+                    dayCell.appendChild(indicator);
+                } else {
+                    dayNum.classList.add('text-gray-500');
+                    dayCell.appendChild(dayNum);
+                }
+                
+                // Click to show details
+                dayCell.onclick = () => showDateDetails(dateStr, sessions);
+                
+                calendarDates.appendChild(dayCell);
+            }
+        }
+
+        function showDateDetails(dateStr, sessions) {
+            selectedDateStr = dateStr;
+            
+            // Format date
+            const date = new Date(dateStr + 'T00:00:00');
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            selectedDate.textContent = date.toLocaleDateString('en-US', options);
+            
+            // Session count
+            sessionCount.textContent = `${sessions} session${sessions !== 1 ? 's' : ''}`;
+            
+            // Render session dots
+            sessionDots.innerHTML = '';
+            const totalDots = Math.max(16, sessions);
+            
+            for (let i = 0; i < totalDots; i++) {
+                const dot = document.createElement('div');
+                
+                if (i < sessions) {
+                    if (i < 16) {
+                        dot.className = 'w-2 h-2 rounded-full bg-green-500';
+                    } else {
+                        dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                    }
+                } else {
+                    dot.className = 'w-2 h-2 rounded-full bg-neutral-700';
+                }
+                
+                sessionDots.appendChild(dot);
+            }
+            
+            dateDetails.style.display = 'block';
+        }
+
+        function navigateMonth(direction) {
+            currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
+            renderCalendar();
+            dateDetails.style.display = 'none';
         }
 
         function addBacklogItem(text, parentId = null) {
@@ -1116,6 +1346,20 @@
         backlogToggle.addEventListener('click', toggleBacklogSidebar);
         closeBacklog.addEventListener('click', toggleBacklogSidebar);
         backlogOverlay.addEventListener('click', toggleBacklogSidebar);
+
+        // Calendar events
+        calendarToggle.addEventListener('click', toggleCalendarSidebar);
+        closeCalendar.addEventListener('click', toggleCalendarSidebar);
+        calendarOverlay.addEventListener('click', () => {
+            if (!calendarSidebar.classList.contains('-translate-x-full')) {
+                toggleCalendarSidebar();
+            }
+            if (!backlogSidebar.classList.contains('translate-x-full')) {
+                toggleBacklogSidebar();
+            }
+        });
+        prevMonth.addEventListener('click', () => navigateMonth(-1));
+        nextMonth.addEventListener('click', () => navigateMonth(1));
 
         addBacklogBtn.addEventListener('click', () => {
             addBacklogItem(backlogInput.value);
