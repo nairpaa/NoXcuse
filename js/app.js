@@ -63,6 +63,13 @@ const closeArchive = document.getElementById('closeArchive');
 const archiveOverlay = document.getElementById('archiveOverlay');
 const archiveList = document.getElementById('archiveList');
 
+// Mobile menu elements
+const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+const mobileMenuDropdown = document.getElementById('mobileMenuDropdown');
+const mobileCalendar = document.getElementById('mobileCalendar');
+const mobileArchive = document.getElementById('mobileArchive');
+const mobileBacklog = document.getElementById('mobileBacklog');
+
 // Notification elements
 const notificationModal = document.getElementById('notificationModal');
 const notificationIcon = document.getElementById('notificationIcon');
@@ -148,17 +155,25 @@ function hideNotification() {
 
 function toggleBacklogSidebar() {
     const isOpen = !backlogSidebar.classList.contains('translate-x-full');
+    const isDesktop = window.innerWidth >= 768;
     
     if (isOpen) {
         // Close
         backlogSidebar.classList.add('translate-x-full');
         backlogOverlay.classList.add('hidden');
-        backlogToggle.classList.remove('hidden'); // Show button
+        if (isDesktop) {
+            backlogToggle.style.display = ''; // Show backlog button (remove inline style)
+        }
+        mobileMenuToggle.classList.remove('hidden');
     } else {
         // Open
         backlogSidebar.classList.remove('translate-x-full');
         backlogOverlay.classList.remove('hidden');
-        backlogToggle.classList.add('hidden'); // Hide button
+        if (isDesktop) {
+            backlogToggle.style.display = 'none'; // Hide backlog button with inline style
+        }
+        mobileMenuToggle.classList.add('hidden');
+        closeMobileMenu();
         
         // Close calendar and archive if open
         if (!calendarSidebar.classList.contains('-translate-x-full')) {
@@ -172,19 +187,27 @@ function toggleBacklogSidebar() {
 
 function toggleCalendarSidebar() {
     const isOpen = !calendarSidebar.classList.contains('-translate-x-full');
+    const isDesktop = window.innerWidth >= 768;
     
     if (isOpen) {
         // Close
         calendarSidebar.classList.add('-translate-x-full');
         calendarOverlay.classList.add('hidden');
-        calendarToggle.classList.remove('hidden'); // Show calendar button
-        archiveToggle.classList.remove('hidden'); // Show archive button
+        if (isDesktop) {
+            calendarToggle.style.display = ''; // Show calendar button
+            archiveToggle.style.display = ''; // Show archive button
+        }
+        mobileMenuToggle.classList.remove('hidden');
     } else {
         // Open
         calendarSidebar.classList.remove('-translate-x-full');
         calendarOverlay.classList.remove('hidden');
-        calendarToggle.classList.add('hidden'); // Hide calendar button
-        archiveToggle.classList.add('hidden'); // Hide archive button
+        if (isDesktop) {
+            calendarToggle.style.display = 'none'; // Hide calendar button
+            archiveToggle.style.display = 'none'; // Hide archive button
+        }
+        mobileMenuToggle.classList.add('hidden');
+        closeMobileMenu();
         renderCalendar();
         
         // Close backlog and archive if open
@@ -199,19 +222,27 @@ function toggleCalendarSidebar() {
 
 function toggleArchiveSidebar() {
     const isOpen = !archiveSidebar.classList.contains('-translate-x-full');
+    const isDesktop = window.innerWidth >= 768;
     
     if (isOpen) {
         // Close
         archiveSidebar.classList.add('-translate-x-full');
         archiveOverlay.classList.add('hidden');
-        archiveToggle.classList.remove('hidden'); // Show archive button
-        calendarToggle.classList.remove('hidden'); // Show calendar button
+        if (isDesktop) {
+            calendarToggle.style.display = ''; // Show calendar button
+            archiveToggle.style.display = ''; // Show archive button
+        }
+        mobileMenuToggle.classList.remove('hidden');
     } else {
         // Open
         archiveSidebar.classList.remove('-translate-x-full');
         archiveOverlay.classList.remove('hidden');
-        archiveToggle.classList.add('hidden'); // Hide archive button
-        calendarToggle.classList.add('hidden'); // Hide calendar button
+        if (isDesktop) {
+            calendarToggle.style.display = 'none'; // Hide calendar button
+            archiveToggle.style.display = 'none'; // Hide archive button
+        }
+        mobileMenuToggle.classList.add('hidden');
+        closeMobileMenu();
         renderArchive();
         
         // Close backlog and calendar if open
@@ -222,6 +253,29 @@ function toggleArchiveSidebar() {
             toggleCalendarSidebar();
         }
     }
+}
+
+function toggleMobileMenu() {
+    const isOpen = !mobileMenuDropdown.classList.contains('hidden');
+    
+    if (isOpen) {
+        mobileMenuDropdown.classList.add('hidden');
+    } else {
+        // Calculate position based on button
+        const buttonRect = mobileMenuToggle.getBoundingClientRect();
+        const dropdownHeight = 144; // Approximate height of 3 items
+        
+        // Position dropdown below button
+        mobileMenuDropdown.style.position = 'fixed';
+        mobileMenuDropdown.style.top = (buttonRect.bottom + 8) + 'px'; // 8px gap
+        mobileMenuDropdown.style.right = (window.innerWidth - buttonRect.right) + 'px';
+        
+        mobileMenuDropdown.classList.remove('hidden');
+    }
+}
+
+function closeMobileMenu() {
+    mobileMenuDropdown.classList.add('hidden');
 }
 
 function renderCalendar() {
@@ -1408,6 +1462,24 @@ nextMonth.addEventListener('click', () => navigateMonth(1));
 archiveToggle.addEventListener('click', toggleArchiveSidebar);
 closeArchive.addEventListener('click', toggleArchiveSidebar);
 
+// Mobile menu events
+mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+
+mobileCalendar.addEventListener('click', () => {
+    closeMobileMenu();
+    toggleCalendarSidebar();
+});
+
+mobileArchive.addEventListener('click', () => {
+    closeMobileMenu();
+    toggleArchiveSidebar();
+});
+
+mobileBacklog.addEventListener('click', () => {
+    closeMobileMenu();
+    toggleBacklogSidebar();
+});
+
 // Overlay click handler (closes any open sidebar)
 calendarOverlay.addEventListener('click', () => {
     if (!calendarSidebar.classList.contains('-translate-x-full')) {
@@ -1436,6 +1508,13 @@ backlogInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         addBacklogItem(backlogInput.value);
         backlogInput.value = '';
+    }
+});
+
+// Close mobile menu when clicking outside
+document.addEventListener('click', (e) => {
+    if (!mobileMenuToggle.contains(e.target) && !mobileMenuDropdown.contains(e.target)) {
+        closeMobileMenu();
     }
 });
 
