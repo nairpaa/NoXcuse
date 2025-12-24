@@ -1078,7 +1078,7 @@ function createBacklogElement(item, isSubitem = false, isCollapsed = false, pare
         
         const addSubBtn = document.createElement('button');
         addSubBtn.textContent = 'Add';
-        addSubBtn.className = 'bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-md text-xs font-medium';
+        addSubBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium';
         addSubBtn.onclick = () => {
             if (subInput.value.trim()) {
                 addBacklogItem(subInput.value, item.id);
@@ -1090,7 +1090,7 @@ function createBacklogElement(item, isSubitem = false, isCollapsed = false, pare
         
         const cancelSubBtn = document.createElement('button');
         cancelSubBtn.textContent = '×';
-        cancelSubBtn.className = 'bg-neutral-700 hover:bg-neutral-600 px-3 py-1.5 rounded-md font-medium text-lg';
+        cancelSubBtn.className = 'bg-neutral-700 hover:bg-neutral-600 px-2 md:px-3 py-1.5 rounded-md font-medium text-lg';
         cancelSubBtn.onclick = () => {
             subInput.value = '';
             subInputContainer.style.display = 'none';
@@ -1367,17 +1367,18 @@ function createTaskElement(task, isSubtask = false, isCollapsed = false, parentI
     // Subtask input (only for main tasks)
     if (!isSubtask) {
         const inputContainer = document.createElement('div');
-        inputContainer.className = 'flex gap-2 mt-3 ml-10';
+        inputContainer.className = 'flex gap-1 md:gap-2 mt-3 ml-6 md:ml-10';
         inputContainer.style.display = 'none';
         
         const input = document.createElement('input');
         input.type = 'text';
         input.placeholder = 'Enter subtask...';
-        input.className = 'flex-1 bg-neutral-800 border border-neutral-700 px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm';
+        input.className = 'flex-1 bg-neutral-800 border border-neutral-700 px-2 md:px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm';
+        input.style.maxWidth = 'calc(100% - 80px)'; // Limit width on mobile to leave space for buttons
         
         const addBtn = document.createElement('button');
         addBtn.textContent = 'Add';
-        addBtn.className = 'bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-md text-xs font-medium';
+        addBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium';
         addBtn.onclick = () => {
             if (input.value.trim()) {
                 addTask(input.value, task.id);
@@ -1389,8 +1390,10 @@ function createTaskElement(task, isSubtask = false, isCollapsed = false, parentI
         
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = '×';
-        cancelBtn.className = 'bg-neutral-800 hover:bg-neutral-700 px-3 py-2 rounded-md font-medium';
-        cancelBtn.style.fontSize = '18px';
+        cancelBtn.className = 'bg-neutral-800 hover:bg-neutral-700 px-2.5 py-1.5 rounded-md text-white text-xs transition-colors flex items-center justify-center';
+        cancelBtn.style.minWidth = '32px';
+        cancelBtn.style.minHeight = '32px';
+        cancelBtn.style.fontSize = '20px';
         cancelBtn.style.lineHeight = '1';
         cancelBtn.onclick = () => {
             input.value = '';

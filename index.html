@@ -6,7 +6,7 @@
     <title>NoXcuse</title>
     <link rel="icon" type="image/png" href="assets/icons/NoXcuse.png">
     
-    <!-- Tailwind CSS (build with: ./tailwindcss -i css/input.css -o css/output.css --minify) -->
+    <!-- Tailwind CSS (build dengan: ./tailwindcss -i css/input.css -o css/output.css --minify) -->
     <link rel="stylesheet" href="css/output.css">
     
     <!-- External Libraries -->
@@ -34,7 +34,7 @@
 
         <!-- Mobile Menu Button (mobile only) -->
         <button id="mobileMenuToggle" class="flex md:hidden fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-ellipsis-v text-gray-400"></i>
+            <i class="fas fa-bars text-gray-400"></i>
         </button>
 
         <!-- Mobile Menu Dropdown -->
@@ -153,7 +153,7 @@
                             placeholder="Add to backlog..." 
                             class="flex-1 bg-neutral-800 border border-neutral-700 px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm"
                         />
-                        <button id="addBacklogBtn" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
+                        <button id="addBacklogBtn" class="bg-blue-600 hover:bg-blue-700 px-2 md:px-4 py-2 rounded-md text-sm font-medium">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
@@ -217,10 +217,10 @@
         </div>
 
         <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-5 mb-8">
-            <div class="flex gap-3">
+            <div class="flex gap-2 md:gap-3">
                 <input type="text" id="taskInput" placeholder="Add new task..." 
                     class="flex-1 bg-neutral-800 border border-neutral-700 px-4 py-2.5 rounded-md text-gray-200 placeholder-gray-500 text-sm"/>
-                <button id="addTaskBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2.5 rounded-md text-sm font-medium">Add</button>
+                <button id="addTaskBtn" class="bg-blue-600 hover:bg-blue-700 px-3 md:px-6 py-2.5 rounded-md text-sm font-medium">Add</button>
             </div>
         </div>
 
