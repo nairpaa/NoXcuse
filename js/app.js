@@ -1229,7 +1229,14 @@ function initSortable() {
                 }
             });
             
-            tasks = newOrder;
+            // CRITICAL FIX: Keep completed tasks from previous days that are not rendered
+            const today = getTodayDate();
+            const hiddenCompletedTasks = tasks.filter(task => {
+                return task.completed && task.completedDate !== today;
+            });
+            
+            // Combine: new order + hidden completed tasks
+            tasks = [...newOrder, ...hiddenCompletedTasks];
             saveTasks();
         }
     });
