@@ -1046,6 +1046,7 @@ function renderBacklog() {
 
                     parentItem.subtasks = newSubtaskOrder;
                     saveBacklog();
+                    renderBacklog(); // Re-render to update isLast margin classes
                 }
             }
         });
@@ -1348,6 +1349,7 @@ function initSortable() {
                     
                     parentTask.subtasks = newSubtaskOrder;
                     saveTasks();
+                    renderTasks(); // Re-render to update isLast margin classes
                 }
             }
         });
