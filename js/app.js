@@ -9,6 +9,7 @@ let currentSessions = 0;
 let isBreak = false;
 let collapsedTasks = new Set();
 let collapsedBacklog = new Set();
+let selectedTimezone = localStorage.getItem('noxcuse_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Sortable instances (for cleanup to prevent memory leak)
 let backlogSortable = null;
@@ -87,6 +88,16 @@ const notificationMessage = document.getElementById('notificationMessage');
 const notificationClose = document.getElementById('notificationClose');
 const notificationSound = document.getElementById('notificationSound');
 
+// Settings elements
+const settingsToggle = document.getElementById('settingsToggle');
+const settingsSidebar = document.getElementById('settingsSidebar');
+const closeSettings = document.getElementById('closeSettings');
+const settingsOverlay = document.getElementById('settingsOverlay');
+const timezoneSelect = document.getElementById('timezoneSelect');
+const mobileSettings = document.getElementById('mobileSettings');
+const currentTimeDisplay = document.getElementById('currentTimeDisplay');
+let timeDisplayInterval = null;
+
 // Helpers
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -103,7 +114,10 @@ function saveBacklog() {
 // Daily session tracking
 function getTodayDate() {
     const today = new Date();
-    return today.toISOString().split('T')[0]; // YYYY-MM-DD
+    // Use selected timezone to get the correct date
+    const options = { timeZone: selectedTimezone, year: 'numeric', month: '2-digit', day: '2-digit' };
+    const formatter = new Intl.DateTimeFormat('en-CA', options); // en-CA uses YYYY-MM-DD format
+    return formatter.format(today);
 }
 
 function loadDailySessions() {
@@ -293,6 +307,142 @@ function toggleMobileMenu() {
 
 function closeMobileMenu() {
     mobileMenuDropdown.classList.add('hidden');
+}
+
+function toggleSettingsSidebar() {
+    const isOpen = !settingsSidebar.classList.contains('translate-x-full');
+    const isDesktop = window.innerWidth >= 768;
+
+    if (isOpen) {
+        // Close
+        settingsSidebar.classList.add('translate-x-full');
+        settingsOverlay.classList.add('hidden');
+        if (isDesktop) {
+            settingsToggle.style.display = '';
+            backlogToggle.style.display = '';
+        }
+        mobileMenuToggle.classList.remove('hidden');
+        stopTimeDisplayUpdate();
+    } else {
+        // Open
+        settingsSidebar.classList.remove('translate-x-full');
+        settingsOverlay.classList.remove('hidden');
+        if (isDesktop) {
+            settingsToggle.style.display = 'none';
+            backlogToggle.style.display = 'none';
+        }
+        mobileMenuToggle.classList.add('hidden');
+        closeMobileMenu();
+
+        // Close other sidebars
+        if (!backlogSidebar.classList.contains('translate-x-full')) {
+            toggleBacklogSidebar();
+        }
+        if (!calendarSidebar.classList.contains('-translate-x-full')) {
+            toggleCalendarSidebar();
+        }
+        if (!archiveSidebar.classList.contains('-translate-x-full')) {
+            toggleArchiveSidebar();
+        }
+
+        // Initialize timezone selector and start time update
+        initTimezoneSelector();
+        startTimeDisplayUpdate();
+    }
+}
+
+function initTimezoneSelector() {
+    // Only populate if not already done
+    if (timezoneSelect.options.length > 1) {
+        timezoneSelect.value = selectedTimezone;
+        return;
+    }
+
+    // Get all timezones
+    const timezones = Intl.supportedValuesOf('timeZone');
+
+    // Group timezones by region
+    const grouped = {};
+    timezones.forEach(tz => {
+        const parts = tz.split('/');
+        const region = parts[0];
+        if (!grouped[region]) grouped[region] = [];
+        grouped[region].push(tz);
+    });
+
+    // Clear existing options except placeholder
+    timezoneSelect.innerHTML = '';
+
+    // Add grouped options
+    Object.keys(grouped).sort().forEach(region => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = region;
+
+        grouped[region].sort().forEach(tz => {
+            const option = document.createElement('option');
+            option.value = tz;
+            // Display friendly name
+            const displayName = tz.replace(/_/g, ' ');
+            option.textContent = displayName;
+            optgroup.appendChild(option);
+        });
+
+        timezoneSelect.appendChild(optgroup);
+    });
+
+    // Set current value
+    timezoneSelect.value = selectedTimezone;
+}
+
+function saveTimezone(newTimezone) {
+    selectedTimezone = newTimezone;
+    localStorage.setItem('noxcuse_timezone', newTimezone);
+
+    // Re-check if day changed with new timezone
+    cachedDailySessions = null; // Clear cache
+    loadDailySessions();
+
+    // Re-render to reflect any changes
+    renderTasks();
+    updateSessionsDisplay();
+
+    // If calendar is open, re-render it
+    if (!calendarSidebar.classList.contains('-translate-x-full')) {
+        renderCalendar();
+    }
+
+    // Update time display
+    updateCurrentTimeDisplay();
+}
+
+function updateCurrentTimeDisplay() {
+    const now = new Date();
+    const options = {
+        timeZone: selectedTimezone,
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    currentTimeDisplay.textContent = `Current time: ${formatter.format(now)}`;
+}
+
+function startTimeDisplayUpdate() {
+    updateCurrentTimeDisplay();
+    if (timeDisplayInterval) clearInterval(timeDisplayInterval);
+    timeDisplayInterval = setInterval(updateCurrentTimeDisplay, 1000);
+}
+
+function stopTimeDisplayUpdate() {
+    if (timeDisplayInterval) {
+        clearInterval(timeDisplayInterval);
+        timeDisplayInterval = null;
+    }
 }
 
 function renderCalendar() {
@@ -1626,6 +1776,20 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !notificationModal.classList.contains('hidden')) {
         hideNotification();
     }
+});
+
+// Settings events
+settingsToggle.addEventListener('click', toggleSettingsSidebar);
+closeSettings.addEventListener('click', toggleSettingsSidebar);
+settingsOverlay.addEventListener('click', toggleSettingsSidebar);
+
+timezoneSelect.addEventListener('change', (e) => {
+    saveTimezone(e.target.value);
+});
+
+mobileSettings.addEventListener('click', () => {
+    closeMobileMenu();
+    toggleSettingsSidebar();
 });
 
 // Init
