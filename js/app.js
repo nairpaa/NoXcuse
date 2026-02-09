@@ -1232,13 +1232,13 @@ function initSortable() {
                 }
             });
             
-            // CRITICAL FIX: Keep completed tasks from previous days that are not rendered
+            // Preserve completed tasks from previous days (hidden from view but still in storage)
             const today = getTodayDate();
             const hiddenCompletedTasks = tasks.filter(task => {
                 return task.completed && task.completedDate !== today;
             });
-            
-            // Combine: new order + hidden completed tasks
+
+            // Merge reordered visible tasks with hidden completed tasks
             tasks = [...newOrder, ...hiddenCompletedTasks];
             saveTasks();
         }
