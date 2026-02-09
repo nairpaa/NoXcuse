@@ -752,8 +752,11 @@ function toggleTask(id) {
         // If this is a main task with subtasks, toggle all subtasks too
         if (task.subtasks && task.subtasks.length > 0) {
             task.subtasks.forEach(subtask => {
-                subtask.completed = task.completed;
-                subtask.completedDate = task.completed ? getTodayDate() : null;
+                // Only update subtasks that are not yet completed (preserve their completedDate)
+                if (!subtask.completed) {
+                    subtask.completed = task.completed;
+                    subtask.completedDate = task.completed ? getTodayDate() : null;
+                }
             });
         }
         
