@@ -15,25 +15,25 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body class="text-gray-200 min-h-screen p-6 md:p-8">
-    <div class="max-w-3xl mx-auto">
-        
+    <div class="max-w-3xl mx-auto relative">
+
         <header class="mb-12">
             <h1 class="text-3xl font-bold mb-2 text-white">NoXcuse</h1>
             <p class="text-gray-500 text-sm">No excuse. Or fail.</p>
         </header>
 
         <!-- Calendar Toggle Button (fixed on left - desktop only) -->
-        <button id="calendarToggle" class="hidden md:flex fixed top-6 left-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
+        <button id="calendarToggle" class="hidden lg:flex fixed top-6 left-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-calendar text-gray-400"></i>
         </button>
 
         <!-- Archive Toggle Button (next to calendar - desktop only) -->
-        <button id="archiveToggle" class="hidden md:flex fixed top-6 left-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
+        <button id="archiveToggle" class="hidden lg:flex fixed top-6 left-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-archive text-gray-400"></i>
         </button>
 
         <!-- Mobile Menu Button (mobile only) -->
-        <button id="mobileMenuToggle" class="flex md:hidden fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
+        <button id="mobileMenuToggle" class="flex lg:hidden absolute -top-2 right-0 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-bars text-gray-400"></i>
         </button>
 
@@ -134,12 +134,12 @@
         <div id="archiveOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
 
         <!-- Settings Toggle Button (fixed on right - desktop only) -->
-        <button id="settingsToggle" class="hidden md:flex fixed top-6 right-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
+        <button id="settingsToggle" class="hidden lg:flex fixed top-6 right-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-cog text-gray-400"></i>
         </button>
 
         <!-- Backlog Toggle Button (fixed on right - desktop only) -->
-        <button id="backlogToggle" class="hidden md:flex fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
+        <button id="backlogToggle" class="hidden lg:flex fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
             <i class="fas fa-bars text-gray-400"></i>
         </button>
 

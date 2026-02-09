@@ -186,7 +186,7 @@ function hideNotification() {
 
 function toggleBacklogSidebar() {
     const isOpen = !backlogSidebar.classList.contains('translate-x-full');
-    const isDesktop = window.innerWidth >= 768;
+    const isDesktop = window.innerWidth >= 1024;
     
     if (isOpen) {
         // Close
@@ -218,7 +218,7 @@ function toggleBacklogSidebar() {
 
 function toggleCalendarSidebar() {
     const isOpen = !calendarSidebar.classList.contains('-translate-x-full');
-    const isDesktop = window.innerWidth >= 768;
+    const isDesktop = window.innerWidth >= 1024;
     
     if (isOpen) {
         // Close
@@ -253,7 +253,7 @@ function toggleCalendarSidebar() {
 
 function toggleArchiveSidebar() {
     const isOpen = !archiveSidebar.classList.contains('-translate-x-full');
-    const isDesktop = window.innerWidth >= 768;
+    const isDesktop = window.innerWidth >= 1024;
     
     if (isOpen) {
         // Close
@@ -311,7 +311,7 @@ function closeMobileMenu() {
 
 function toggleSettingsSidebar() {
     const isOpen = !settingsSidebar.classList.contains('translate-x-full');
-    const isDesktop = window.innerWidth >= 768;
+    const isDesktop = window.innerWidth >= 1024;
 
     if (isOpen) {
         // Close
