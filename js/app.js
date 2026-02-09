@@ -10,6 +10,15 @@ let isBreak = false;
 let collapsedTasks = new Set();
 let collapsedBacklog = new Set();
 
+// Sortable instances (for cleanup to prevent memory leak)
+let backlogSortable = null;
+let backlogSubtaskSortables = [];
+let taskListSortable = null;
+let subtaskSortables = [];
+
+// Cached daily sessions data (to avoid redundant localStorage parsing)
+let cachedDailySessions = null;
+
 // Calendar state
 let currentCalendarDate = new Date();
 let selectedDateStr = null;
@@ -98,9 +107,14 @@ function getTodayDate() {
 }
 
 function loadDailySessions() {
-    const data = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+    // Load from localStorage only if not cached
+    if (!cachedDailySessions) {
+        cachedDailySessions = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+    }
+
+    const data = cachedDailySessions;
     const today = getTodayDate();
-    
+
     // Check if day changed
     if (data.currentDate !== today) {
         // Save yesterday's sessions to history
@@ -108,29 +122,32 @@ function loadDailySessions() {
             if (!data.history) data.history = {};
             data.history[data.currentDate] = data.currentSessions;
         }
-        
+
         // Reset for new day
         data.currentDate = today;
         data.currentSessions = 0;
         localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
-        
+
         currentSessions = 0;
     } else {
         // Same day, load current sessions
         currentSessions = data.currentSessions || 0;
     }
-    
+
     return data;
 }
 
 function saveDailySessions() {
-    const data = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+    // Use cached data instead of re-parsing from localStorage
+    if (!cachedDailySessions) {
+        cachedDailySessions = {};
+    }
+
     const today = getTodayDate();
-    
-    data.currentDate = today;
-    data.currentSessions = currentSessions;
-    
-    localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
+    cachedDailySessions.currentDate = today;
+    cachedDailySessions.currentSessions = currentSessions;
+
+    localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(cachedDailySessions));
 }
 
 // Custom notification
@@ -291,8 +308,9 @@ function renderCalendar() {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    // Get session data
-    const sessionData = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
+    // Get session data (use cache to avoid redundant parsing)
+    const sessionData = cachedDailySessions ||
+        (cachedDailySessions = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {});
     const history = sessionData.history || {};
     const today = getTodayDate();
     
@@ -939,47 +957,99 @@ function updateSessionsDisplay() {
 
 // Render Backlog
 function renderBacklog() {
+    // Destroy existing sortable instances to prevent memory leak
+    if (backlogSortable) {
+        backlogSortable.destroy();
+        backlogSortable = null;
+    }
+    backlogSubtaskSortables.forEach(sortable => sortable.destroy());
+    backlogSubtaskSortables = [];
+
     backlogList.innerHTML = '';
     backlog.forEach(item => {
         const isCollapsed = collapsedBacklog.has(item.id);
-        
+
+        // Create container for main item + subtasks (similar to task structure)
+        const itemContainer = document.createElement('div');
+        itemContainer.className = 'backlog-container mb-2';
+        itemContainer.setAttribute('data-id', item.id);
+
         // Add main item
-        backlogList.appendChild(createBacklogElement(item, false, isCollapsed));
-        
-        // Add subtasks
+        const mainElement = createBacklogElement(item, false, isCollapsed);
+        mainElement.classList.remove('mb-2');
+        itemContainer.appendChild(mainElement);
+
+        // Add subtasks container
         if (item.subtasks && item.subtasks.length > 0 && !isCollapsed) {
+            const subtasksContainer = document.createElement('div');
+            subtasksContainer.className = 'backlog-subtasks-container';
+            subtasksContainer.setAttribute('data-parent-id', item.id);
+
             item.subtasks.forEach((subitem, index) => {
                 const isLast = index === item.subtasks.length - 1;
-                backlogList.appendChild(createBacklogElement(subitem, true, false, item.id, isLast));
+                const subElement = createBacklogElement(subitem, true, false, item.id, isLast);
+                subtasksContainer.appendChild(subElement);
             });
+
+            itemContainer.appendChild(subtasksContainer);
         }
+
+        backlogList.appendChild(itemContainer);
     });
-    
-    // Initialize sortable for backlog
-    new Sortable(backlogList, {
+
+    // Initialize sortable for main backlog items (store reference for cleanup)
+    backlogSortable = new Sortable(backlogList, {
         animation: 150,
         handle: '.backlog-drag-handle',
         sort: true,
-        filter: '.backlog-subtask',
+        draggable: '.backlog-container',
         onEnd: function(evt) {
-            // Reorder backlog (main items only)
-            const items = Array.from(backlogList.querySelectorAll('[data-id]'));
-            const seenItems = new Set();
+            // Reorder backlog based on container order
+            const containers = Array.from(backlogList.querySelectorAll('.backlog-container'));
             const newOrder = [];
-            
-            items.forEach(el => {
-                const id = el.getAttribute('data-id');
+
+            containers.forEach(container => {
+                const id = container.getAttribute('data-id');
                 const item = backlog.find(b => b.id === id);
-                
-                if (item && !seenItems.has(item.id)) {
-                    seenItems.add(item.id);
+                if (item) {
                     newOrder.push(item);
                 }
             });
-            
+
             backlog = newOrder;
             saveBacklog();
         }
+    });
+
+    // Initialize sortable for subtasks within each backlog item
+    const subtaskContainers = document.querySelectorAll('.backlog-subtasks-container');
+    subtaskContainers.forEach(container => {
+        const sortable = new Sortable(container, {
+            animation: 150,
+            handle: '.backlog-drag-handle',
+            ghostClass: 'sortable-ghost',
+            onEnd: function(evt) {
+                const parentId = container.getAttribute('data-parent-id');
+                const parentItem = backlog.find(b => b.id === parentId);
+
+                if (parentItem) {
+                    const subtaskElements = Array.from(container.children);
+                    const newSubtaskOrder = [];
+
+                    subtaskElements.forEach(el => {
+                        const subtaskId = el.getAttribute('data-id');
+                        const subtask = parentItem.subtasks.find(s => s.id === subtaskId);
+                        if (subtask) {
+                            newSubtaskOrder.push(subtask);
+                        }
+                    });
+
+                    parentItem.subtasks = newSubtaskOrder;
+                    saveBacklog();
+                }
+            }
+        });
+        backlogSubtaskSortables.push(sortable);
     });
 }
 
@@ -1177,8 +1247,16 @@ function renderTasks() {
 }
 
 function initSortable() {
-    // Sortable for main tasks
-    new Sortable(taskList, {
+    // Destroy existing sortable instances to prevent memory leak
+    if (taskListSortable) {
+        taskListSortable.destroy();
+        taskListSortable = null;
+    }
+    subtaskSortables.forEach(sortable => sortable.destroy());
+    subtaskSortables = [];
+
+    // Sortable for main tasks (store reference for cleanup)
+    taskListSortable = new Sortable(taskList, {
         group: {
             name: 'shared',
             pull: true,
@@ -1244,10 +1322,10 @@ function initSortable() {
         }
     });
     
-    // Sortable for subtasks within each parent
+    // Sortable for subtasks within each parent (store references for cleanup)
     const subtaskContainers = document.querySelectorAll('.subtasks-container');
     subtaskContainers.forEach(container => {
-        new Sortable(container, {
+        const sortable = new Sortable(container, {
             animation: 150,
             handle: '.drag-handle',
             ghostClass: 'sortable-ghost',
@@ -1273,6 +1351,7 @@ function initSortable() {
                 }
             }
         });
+        subtaskSortables.push(sortable);
     });
 }
 
