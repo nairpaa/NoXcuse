@@ -288,19 +288,14 @@ function toggleArchiveSidebar() {
 
 function toggleMobileMenu() {
     const isOpen = !mobileMenuDropdown.classList.contains('hidden');
-    
+
     if (isOpen) {
         mobileMenuDropdown.classList.add('hidden');
     } else {
-        // Calculate position based on button
         const buttonRect = mobileMenuToggle.getBoundingClientRect();
-        const dropdownHeight = 144; // Approximate height of 3 items
-        
-        // Position dropdown below button
         mobileMenuDropdown.style.position = 'fixed';
-        mobileMenuDropdown.style.top = (buttonRect.bottom + 8) + 'px'; // 8px gap
+        mobileMenuDropdown.style.top = (buttonRect.bottom + 8) + 'px';
         mobileMenuDropdown.style.right = (window.innerWidth - buttonRect.right) + 'px';
-        
         mobileMenuDropdown.classList.remove('hidden');
     }
 }
@@ -1076,7 +1071,6 @@ function skipBreak() {
     timerControls.style.display = 'flex';
 }
 
-
 function updateSessionsDisplay() {
     sessionsDisplay.innerHTML = '';
     
@@ -1699,12 +1693,14 @@ backlogOverlay.addEventListener('click', toggleBacklogSidebar);
 // Calendar events
 calendarToggle.addEventListener('click', toggleCalendarSidebar);
 closeCalendar.addEventListener('click', toggleCalendarSidebar);
+calendarOverlay.addEventListener('click', toggleCalendarSidebar);
 prevMonth.addEventListener('click', () => navigateMonth(-1));
 nextMonth.addEventListener('click', () => navigateMonth(1));
 
 // Archive events
 archiveToggle.addEventListener('click', toggleArchiveSidebar);
 closeArchive.addEventListener('click', toggleArchiveSidebar);
+archiveOverlay.addEventListener('click', toggleArchiveSidebar);
 
 // Mobile menu events
 mobileMenuToggle.addEventListener('click', toggleMobileMenu);
@@ -1722,25 +1718,6 @@ mobileArchive.addEventListener('click', () => {
 mobileBacklog.addEventListener('click', () => {
     closeMobileMenu();
     toggleBacklogSidebar();
-});
-
-// Overlay click handler (closes any open sidebar)
-calendarOverlay.addEventListener('click', () => {
-    if (!calendarSidebar.classList.contains('-translate-x-full')) {
-        toggleCalendarSidebar();
-    }
-});
-
-archiveOverlay.addEventListener('click', () => {
-    if (!archiveSidebar.classList.contains('-translate-x-full')) {
-        toggleArchiveSidebar();
-    }
-});
-
-backlogOverlay.addEventListener('click', () => {
-    if (!backlogSidebar.classList.contains('translate-x-full')) {
-        toggleBacklogSidebar();
-    }
 });
 
 addBacklogBtn.addEventListener('click', () => {
