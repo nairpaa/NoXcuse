@@ -944,11 +944,114 @@ function formatTime(seconds) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+function saveTimerState(running) {
+    const state = { isBreak, running };
+    if (running) {
+        state.endAt = Date.now() + (timeLeft * 1000);
+    } else {
+        state.timeLeft = timeLeft;
+    }
+    localStorage.setItem('noxcuse_timer', JSON.stringify(state));
+}
+
+function clearTimerState() {
+    localStorage.removeItem('noxcuse_timer');
+}
+
+function syncTimerState(saved) {
+    if (!saved) {
+        if (isRunning) stopTimer(true);
+        timeLeft = 25 * 60;
+        isBreak = false;
+        updateTimerDisplay();
+        timerControls.style.display = 'flex';
+        breakButtons.style.display = 'none';
+        cancelBreakContainer.style.display = 'none';
+        return;
+    }
+
+    if (saved.completed) {
+        if (isRunning) stopTimer(true);
+        timeLeft = 25 * 60;
+        isBreak = false;
+        updateTimerDisplay();
+        if (!saved.isBreak) {
+            timerControls.style.display = 'none';
+            breakButtons.style.display = 'flex';
+            cancelBreakContainer.style.display = 'none';
+        } else {
+            timerControls.style.display = 'flex';
+            breakButtons.style.display = 'none';
+            cancelBreakContainer.style.display = 'none';
+        }
+        return;
+    }
+
+    isBreak = saved.isBreak;
+
+    if (isBreak) {
+        breakButtons.style.display = 'none';
+        timerControls.style.display = 'none';
+        cancelBreakContainer.style.display = 'flex';
+    }
+
+    if (saved.running) {
+        timeLeft = Math.max(0, Math.round((saved.endAt - Date.now()) / 1000));
+        updateTimerDisplay();
+        if (!isRunning) startTimer(true);
+    } else {
+        if (isRunning) stopTimer(true);
+        timeLeft = saved.timeLeft;
+        updateTimerDisplay();
+    }
+}
+
+function restoreTimer() {
+    const saved = JSON.parse(localStorage.getItem('noxcuse_timer'));
+    if (!saved) return;
+
+    if (saved.completed) {
+        // Timer completed (possibly in another tab)
+        if (!saved.isBreak) {
+            timerControls.style.display = 'none';
+            breakButtons.style.display = 'flex';
+        }
+        return;
+    }
+
+    isBreak = saved.isBreak;
+
+    if (isBreak) {
+        breakButtons.style.display = 'none';
+        timerControls.style.display = 'none';
+        cancelBreakContainer.style.display = 'flex';
+    }
+
+    if (!saved.running) {
+        // Was paused, just restore display
+        timeLeft = saved.timeLeft;
+        updateTimerDisplay();
+        return;
+    }
+
+    const remaining = Math.round((saved.endAt - Date.now()) / 1000);
+
+    if (remaining <= 0) {
+        // Timer finished while tab was closed
+        localStorage.setItem('noxcuse_timer', JSON.stringify({ completed: true, isBreak }));
+        timeLeft = 0;
+        handleTimerComplete();
+    } else {
+        timeLeft = remaining;
+        updateTimerDisplay();
+        startTimer(true);
+    }
+}
+
 function updateTimerDisplay() {
     const timeString = formatTime(timeLeft);
     timerDisplay.textContent = timeString;
-    
-    // Update document title
+
     if (isRunning) {
         document.title = `${timeString} - NoXcuse`;
     } else {
@@ -956,9 +1059,11 @@ function updateTimerDisplay() {
     }
 }
 
-function startTimer() {
+function startTimer(skipSave) {
     if (isRunning) return;
-    
+
+    if (!skipSave) saveTimerState(true);
+
     isRunning = true;
     startBtn.disabled = true;
     startBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -971,29 +1076,33 @@ function startTimer() {
         updateTimerDisplay();
 
         if (timeLeft <= 0) {
-            stopTimer();
+            localStorage.setItem('noxcuse_timer', JSON.stringify({ completed: true, isBreak }));
+            stopTimer(true);
             handleTimerComplete();
         }
     }, 1000);
 }
 
-function stopTimer() {
+function stopTimer(skipSave) {
+    clearInterval(timerInterval);
+    if (isRunning && !skipSave) {
+        saveTimerState(false); // Save paused state
+    }
     isRunning = false;
     startBtn.disabled = false;
     startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     stopBtn.disabled = true;
     stopBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-neutral-800', 'hover:bg-neutral-700');
     stopBtn.classList.remove('bg-rose-500', 'hover:bg-rose-400', 'text-white');
-    clearInterval(timerInterval);
 }
 
 function resetTimer() {
-    stopTimer();
+    stopTimer(true);
+    clearTimerState();
     timeLeft = 25 * 60;
-    updateTimerDisplay();
     isBreak = false;
-    
-    // Show timer controls, hide all break buttons
+    updateTimerDisplay();
+
     timerControls.style.display = 'flex';
     breakButtons.style.display = 'none';
     cancelBreakContainer.style.display = 'none';
@@ -1001,15 +1110,13 @@ function resetTimer() {
 
 function handleTimerComplete() {
     if (!isBreak) {
-        // Pomodoro complete
         currentSessions++;
-        saveDailySessions(); // Save to localStorage
+        saveDailySessions();
         updateSessionsDisplay();
-        
-        // Show break buttons, hide timer controls
+
         timerControls.style.display = 'none';
         breakButtons.style.display = 'flex';
-        
+
         showNotification(
             'Pomodoro Complete! 🎉',
             'Great work! Time to take a break.',
@@ -1017,16 +1124,14 @@ function handleTimerComplete() {
             'bg-green-600'
         );
     } else {
-        // Break complete
         timeLeft = 25 * 60;
         isBreak = false;
-        
-        // Show timer controls, hide cancel break button
+
         cancelBreakContainer.style.display = 'none';
         timerControls.style.display = 'flex';
-        
+
         updateTimerDisplay();
-        
+
         showNotification(
             'Break Complete! 💪',
             'Ready for the next pomodoro session?',
@@ -1040,33 +1145,31 @@ function startBreak(minutes) {
     timeLeft = minutes * 60;
     isBreak = true;
     updateTimerDisplay();
-    
-    // Hide break buttons and timer controls, show cancel break button
+
     breakButtons.style.display = 'none';
     timerControls.style.display = 'none';
     cancelBreakContainer.style.display = 'flex';
-    
-    // Auto start break timer
+
     startTimer();
 }
 
 function cancelBreak() {
-    stopTimer();
+    stopTimer(true);
+    clearTimerState();
     timeLeft = 25 * 60;
     isBreak = false;
     updateTimerDisplay();
-    
-    // Hide cancel break button, show timer controls
+
     cancelBreakContainer.style.display = 'none';
     timerControls.style.display = 'flex';
 }
 
 function skipBreak() {
+    clearTimerState();
     timeLeft = 25 * 60;
     isBreak = false;
     updateTimerDisplay();
-    
-    // Hide break buttons, show timer controls
+
     breakButtons.style.display = 'none';
     timerControls.style.display = 'flex';
 }
@@ -1676,8 +1779,8 @@ taskInput.addEventListener('keypress', (e) => {
     }
 });
 
-startBtn.addEventListener('click', startTimer);
-stopBtn.addEventListener('click', stopTimer);
+startBtn.addEventListener('click', () => startTimer());
+stopBtn.addEventListener('click', () => stopTimer());
 resetBtn.addEventListener('click', resetTimer);
 
 break5Btn.addEventListener('click', () => startBreak(5));
@@ -1769,9 +1872,33 @@ mobileSettings.addEventListener('click', () => {
     toggleSettingsSidebar();
 });
 
+// Cross-tab sync via storage event
+window.addEventListener('storage', (e) => {
+    if (e.key === 'noxcuse_timer') {
+        syncTimerState(e.newValue ? JSON.parse(e.newValue) : null);
+    }
+    if (e.key === 'noxcuse_daily_sessions') {
+        cachedDailySessions = null;
+        loadDailySessions();
+        updateSessionsDisplay();
+    }
+});
+
+// Full sync when tab becomes visible (fallback for storage event)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+
+    syncTimerState(JSON.parse(localStorage.getItem('noxcuse_timer')));
+
+    cachedDailySessions = null;
+    loadDailySessions();
+    updateSessionsDisplay();
+});
+
 // Init
 loadDailySessions();
 renderTasks();
 renderBacklog();
 updateTimerDisplay();
 updateSessionsDisplay();
+restoreTimer();
