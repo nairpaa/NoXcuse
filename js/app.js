@@ -1,1904 +1,848 @@
-// State
-let tasks = JSON.parse(localStorage.getItem('noxcuse_tasks')) || [];
-let backlog = JSON.parse(localStorage.getItem('noxcuse_backlog')) || [];
-let currentTaskId = null;
-let timerInterval = null;
-let timeLeft = 25 * 60;
-let isRunning = false;
-let currentSessions = 0;
-let isBreak = false;
-let collapsedTasks = new Set();
-let collapsedBacklog = new Set();
-let selectedTimezone = localStorage.getItem('noxcuse_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone;
+import { h, render, Component, createRef } from './vendor/preact.module.js';
+import * as store from './store.js';
+import { dayKey, hm, minuteOfDay, splitKey, keyOf, daysIn, dowOf, addDays, addMonths, dayLabel, dayTitle, fmtDuration, pad, MONTHS, MON3, DOW3 } from './dates.js';
+import { beep, unlockAudio, notify, requestNotify } from './sound.js';
+import { renderDesktop } from './views/desktop.js';
+import { renderMobile } from './views/mobile.js';
 
-// Sortable instances (for cleanup to prevent memory leak)
-let backlogSortable = null;
-let backlogSubtaskSortables = [];
-let taskListSortable = null;
-let subtaskSortables = [];
+const TICK_MS = 250;
 
-// Cached daily sessions data (to avoid redundant localStorage parsing)
-let cachedDailySessions = null;
-
-// Calendar state
-let currentCalendarDate = new Date();
-let selectedDateStr = null;
-
-// DOM
-const timerDisplay = document.getElementById('timer');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const resetBtn = document.getElementById('resetBtn');
-const timerControls = document.getElementById('timerControls');
-const breakButtons = document.getElementById('breakButtons');
-const break5Btn = document.getElementById('break5Btn');
-const break15Btn = document.getElementById('break15Btn');
-const skipBreakBtn = document.getElementById('skipBreakBtn');
-const cancelBreakContainer = document.getElementById('cancelBreakContainer');
-const cancelBreakBtn = document.getElementById('cancelBreakBtn');
-const taskInput = document.getElementById('taskInput');
-const addTaskBtn = document.getElementById('addTaskBtn');
-const taskList = document.getElementById('taskList');
-const sessionsDisplay = document.getElementById('sessions');
-
-// Backlog elements
-const backlogToggle = document.getElementById('backlogToggle');
-const backlogSidebar = document.getElementById('backlogSidebar');
-const closeBacklog = document.getElementById('closeBacklog');
-const backlogOverlay = document.getElementById('backlogOverlay');
-const backlogInput = document.getElementById('backlogInput');
-const addBacklogBtn = document.getElementById('addBacklogBtn');
-const backlogList = document.getElementById('backlogList');
-
-// Calendar elements
-const calendarToggle = document.getElementById('calendarToggle');
-const calendarSidebar = document.getElementById('calendarSidebar');
-const closeCalendar = document.getElementById('closeCalendar');
-const calendarOverlay = document.getElementById('calendarOverlay');
-const prevMonth = document.getElementById('prevMonth');
-const nextMonth = document.getElementById('nextMonth');
-const currentMonth = document.getElementById('currentMonth');
-const calendarDates = document.getElementById('calendarDates');
-const dateDetails = document.getElementById('dateDetails');
-const selectedDate = document.getElementById('selectedDate');
-const sessionCount = document.getElementById('sessionCount');
-const sessionDots = document.getElementById('sessionDots');
-const dateTasksSection = document.getElementById('dateTasksSection');
-const dateTasks = document.getElementById('dateTasks');
-
-// Archive elements
-const archiveToggle = document.getElementById('archiveToggle');
-const archiveSidebar = document.getElementById('archiveSidebar');
-const closeArchive = document.getElementById('closeArchive');
-const archiveOverlay = document.getElementById('archiveOverlay');
-const archiveList = document.getElementById('archiveList');
-
-// Mobile menu elements
-const mobileMenuToggle = document.getElementById('mobileMenuToggle');
-const mobileMenuDropdown = document.getElementById('mobileMenuDropdown');
-const mobileCalendar = document.getElementById('mobileCalendar');
-const mobileArchive = document.getElementById('mobileArchive');
-const mobileBacklog = document.getElementById('mobileBacklog');
-
-// Notification elements
-const notificationModal = document.getElementById('notificationModal');
-const notificationIcon = document.getElementById('notificationIcon');
-const notificationTitle = document.getElementById('notificationTitle');
-const notificationMessage = document.getElementById('notificationMessage');
-const notificationClose = document.getElementById('notificationClose');
-const notificationSound = document.getElementById('notificationSound');
-
-// Settings elements
-const settingsToggle = document.getElementById('settingsToggle');
-const settingsSidebar = document.getElementById('settingsSidebar');
-const closeSettings = document.getElementById('closeSettings');
-const settingsOverlay = document.getElementById('settingsOverlay');
-const timezoneSelect = document.getElementById('timezoneSelect');
-const mobileSettings = document.getElementById('mobileSettings');
-const currentTimeDisplay = document.getElementById('currentTimeDisplay');
-let timeDisplayInterval = null;
-
-// Helpers
-function generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+function deviceOf(w) {
+    if (w < 700) return 'mobile';
+    if (w < 1000) return 'tablet';
+    return 'desktop';
 }
 
-function saveTasks() {
-    localStorage.setItem('noxcuse_tasks', JSON.stringify(tasks));
+// Desktop has no Tasks/More pages and mobile has no Archive page.
+function pageFor(device, page) {
+    if (device === 'mobile') return page === 'archive' ? 'more' : page;
+    return page === 'tasks' || page === 'more' ? 'timer' : page;
 }
 
-function saveBacklog() {
-    localStorage.setItem('noxcuse_backlog', JSON.stringify(backlog));
-}
+// The user is not looking at this tab (hidden, or another app has focus).
+const away = () => document.hidden || !document.hasFocus();
 
-// Daily session tracking
-function getTodayDate() {
-    const today = new Date();
-    // Use selected timezone to get the correct date
-    const options = { timeZone: selectedTimezone, year: 'numeric', month: '2-digit', day: '2-digit' };
-    const formatter = new Intl.DateTimeFormat('en-CA', options); // en-CA uses YYYY-MM-DD format
-    return formatter.format(today);
-}
+// Space activates these controls natively instead of starting the timer.
+const NATIVE_SPACE = '[role="checkbox"],[role="switch"],[role="tab"],[role="dialog"]';
 
-function loadDailySessions() {
-    // Load from localStorage only if not cached
-    if (!cachedDailySessions) {
-        cachedDailySessions = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {};
-    }
-
-    const data = cachedDailySessions;
-    const today = getTodayDate();
-
-    // Check if day changed
-    if (data.currentDate !== today) {
-        // Save yesterday's sessions to history
-        if (data.currentDate && data.currentSessions > 0) {
-            if (!data.history) data.history = {};
-            data.history[data.currentDate] = data.currentSessions;
-        }
-
-        // Reset for new day
-        data.currentDate = today;
-        data.currentSessions = 0;
-        localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(data));
-
-        currentSessions = 0;
-    } else {
-        // Same day, load current sessions
-        currentSessions = data.currentSessions || 0;
-    }
-
-    return data;
-}
-
-function saveDailySessions() {
-    // Use cached data instead of re-parsing from localStorage
-    if (!cachedDailySessions) {
-        cachedDailySessions = {};
-    }
-
-    const today = getTodayDate();
-    cachedDailySessions.currentDate = today;
-    cachedDailySessions.currentSessions = currentSessions;
-
-    localStorage.setItem('noxcuse_daily_sessions', JSON.stringify(cachedDailySessions));
-}
-
-// Custom notification
-function showNotification(title, message, iconClass = 'fa-bell', iconColor = 'bg-blue-600') {
-    // Play sound
-    notificationSound.currentTime = 0;
-    notificationSound.play().catch(err => console.log('Audio play failed:', err));
-    
-    // Update notification content
-    notificationTitle.textContent = title;
-    notificationMessage.textContent = message;
-    notificationIcon.className = `w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${iconColor}`;
-    notificationIcon.querySelector('i').className = `fas ${iconClass} text-3xl text-white`;
-    
-    // Show modal
-    notificationModal.classList.remove('hidden');
-}
-
-function hideNotification() {
-    notificationModal.classList.add('hidden');
-}
-
-function toggleBacklogSidebar() {
-    const isOpen = !backlogSidebar.classList.contains('translate-x-full');
-    const isDesktop = window.innerWidth >= 1024;
-    
-    if (isOpen) {
-        // Close
-        backlogSidebar.classList.add('translate-x-full');
-        backlogOverlay.classList.add('hidden');
-        if (isDesktop) {
-            backlogToggle.style.display = ''; // Show backlog button (remove inline style)
-        }
-        mobileMenuToggle.classList.remove('hidden');
-    } else {
-        // Open
-        backlogSidebar.classList.remove('translate-x-full');
-        backlogOverlay.classList.remove('hidden');
-        if (isDesktop) {
-            backlogToggle.style.display = 'none'; // Hide backlog button with inline style
-        }
-        mobileMenuToggle.classList.add('hidden');
-        closeMobileMenu();
-        
-        // Close calendar and archive if open
-        if (!calendarSidebar.classList.contains('-translate-x-full')) {
-            toggleCalendarSidebar();
-        }
-        if (!archiveSidebar.classList.contains('-translate-x-full')) {
-            toggleArchiveSidebar();
-        }
-    }
-}
-
-function toggleCalendarSidebar() {
-    const isOpen = !calendarSidebar.classList.contains('-translate-x-full');
-    const isDesktop = window.innerWidth >= 1024;
-    
-    if (isOpen) {
-        // Close
-        calendarSidebar.classList.add('-translate-x-full');
-        calendarOverlay.classList.add('hidden');
-        if (isDesktop) {
-            calendarToggle.style.display = ''; // Show calendar button
-            archiveToggle.style.display = ''; // Show archive button
-        }
-        mobileMenuToggle.classList.remove('hidden');
-    } else {
-        // Open
-        calendarSidebar.classList.remove('-translate-x-full');
-        calendarOverlay.classList.remove('hidden');
-        if (isDesktop) {
-            calendarToggle.style.display = 'none'; // Hide calendar button
-            archiveToggle.style.display = 'none'; // Hide archive button
-        }
-        mobileMenuToggle.classList.add('hidden');
-        closeMobileMenu();
-        renderCalendar();
-        
-        // Close backlog and archive if open
-        if (!backlogSidebar.classList.contains('translate-x-full')) {
-            toggleBacklogSidebar();
-        }
-        if (!archiveSidebar.classList.contains('-translate-x-full')) {
-            toggleArchiveSidebar();
-        }
-    }
-}
-
-function toggleArchiveSidebar() {
-    const isOpen = !archiveSidebar.classList.contains('-translate-x-full');
-    const isDesktop = window.innerWidth >= 1024;
-    
-    if (isOpen) {
-        // Close
-        archiveSidebar.classList.add('-translate-x-full');
-        archiveOverlay.classList.add('hidden');
-        if (isDesktop) {
-            calendarToggle.style.display = ''; // Show calendar button
-            archiveToggle.style.display = ''; // Show archive button
-        }
-        mobileMenuToggle.classList.remove('hidden');
-    } else {
-        // Open
-        archiveSidebar.classList.remove('-translate-x-full');
-        archiveOverlay.classList.remove('hidden');
-        if (isDesktop) {
-            calendarToggle.style.display = 'none'; // Hide calendar button
-            archiveToggle.style.display = 'none'; // Hide archive button
-        }
-        mobileMenuToggle.classList.add('hidden');
-        closeMobileMenu();
-        renderArchive();
-        
-        // Close backlog and calendar if open
-        if (!backlogSidebar.classList.contains('translate-x-full')) {
-            toggleBacklogSidebar();
-        }
-        if (!calendarSidebar.classList.contains('-translate-x-full')) {
-            toggleCalendarSidebar();
-        }
-    }
-}
-
-function toggleMobileMenu() {
-    const isOpen = !mobileMenuDropdown.classList.contains('hidden');
-
-    if (isOpen) {
-        mobileMenuDropdown.classList.add('hidden');
-    } else {
-        const buttonRect = mobileMenuToggle.getBoundingClientRect();
-        mobileMenuDropdown.style.position = 'fixed';
-        mobileMenuDropdown.style.top = (buttonRect.bottom + 8) + 'px';
-        mobileMenuDropdown.style.right = (window.innerWidth - buttonRect.right) + 'px';
-        mobileMenuDropdown.classList.remove('hidden');
-    }
-}
-
-function closeMobileMenu() {
-    mobileMenuDropdown.classList.add('hidden');
-}
-
-function toggleSettingsSidebar() {
-    const isOpen = !settingsSidebar.classList.contains('translate-x-full');
-    const isDesktop = window.innerWidth >= 1024;
-
-    if (isOpen) {
-        // Close
-        settingsSidebar.classList.add('translate-x-full');
-        settingsOverlay.classList.add('hidden');
-        if (isDesktop) {
-            settingsToggle.style.display = '';
-            backlogToggle.style.display = '';
-        }
-        mobileMenuToggle.classList.remove('hidden');
-        stopTimeDisplayUpdate();
-    } else {
-        // Open
-        settingsSidebar.classList.remove('translate-x-full');
-        settingsOverlay.classList.remove('hidden');
-        if (isDesktop) {
-            settingsToggle.style.display = 'none';
-            backlogToggle.style.display = 'none';
-        }
-        mobileMenuToggle.classList.add('hidden');
-        closeMobileMenu();
-
-        // Close other sidebars
-        if (!backlogSidebar.classList.contains('translate-x-full')) {
-            toggleBacklogSidebar();
-        }
-        if (!calendarSidebar.classList.contains('-translate-x-full')) {
-            toggleCalendarSidebar();
-        }
-        if (!archiveSidebar.classList.contains('-translate-x-full')) {
-            toggleArchiveSidebar();
-        }
-
-        // Initialize timezone selector and start time update
-        initTimezoneSelector();
-        startTimeDisplayUpdate();
-    }
-}
-
-function initTimezoneSelector() {
-    // Only populate if not already done
-    if (timezoneSelect.options.length > 1) {
-        timezoneSelect.value = selectedTimezone;
-        return;
-    }
-
-    // Get all timezones
-    const timezones = Intl.supportedValuesOf('timeZone');
-
-    // Group timezones by region
-    const grouped = {};
-    timezones.forEach(tz => {
-        const parts = tz.split('/');
-        const region = parts[0];
-        if (!grouped[region]) grouped[region] = [];
-        grouped[region].push(tz);
-    });
-
-    // Clear existing options except placeholder
-    timezoneSelect.innerHTML = '';
-
-    // Add grouped options
-    Object.keys(grouped).sort().forEach(region => {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = region;
-
-        grouped[region].sort().forEach(tz => {
-            const option = document.createElement('option');
-            option.value = tz;
-            // Display friendly name
-            const displayName = tz.replace(/_/g, ' ');
-            option.textContent = displayName;
-            optgroup.appendChild(option);
+class App extends Component {
+    constructor() {
+        super();
+        store.setWriteErrorHandler(() => {
+            if (!this.mounted) this.storageWarning = true;
+            else if (Date.now() - (this.lastStorageWarning || 0) > 60000) {
+                this.lastStorageWarning = Date.now();
+                this.flash('Can’t save: browser storage is full or blocked', 'over');
+            }
         });
-
-        timezoneSelect.appendChild(optgroup);
-    });
-
-    // Set current value
-    timezoneSelect.value = selectedTimezone;
-}
-
-function saveTimezone(newTimezone) {
-    selectedTimezone = newTimezone;
-    localStorage.setItem('noxcuse_timezone', newTimezone);
-
-    // Re-check if day changed with new timezone
-    cachedDailySessions = null; // Clear cache
-    loadDailySessions();
-
-    // Re-render to reflect any changes
-    renderTasks();
-    updateSessionsDisplay();
-
-    // If calendar is open, re-render it
-    if (!calendarSidebar.classList.contains('-translate-x-full')) {
-        renderCalendar();
+        store.migrate();
+        const data = store.readAll();
+        this.state = {
+            ...data,
+            now: Date.now(),
+            page: 'timer',
+            overlay: null,
+            toast: null,
+            confirmReset: false,
+            draft: '',
+            bdraft: '',
+            subDrafts: {},
+            editing: null,
+            editVal: '',
+            expanded: {},
+            drag: null,
+            bdrag: null,
+            cal: null,
+            selDay: null,
+            aq: '',
+            agroup: 'day',
+            ascope: null,
+            mtab: 'today',
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches
+        };
+        this.addInput = createRef();
+        this.fileInput = createRef();
+        this.lastDay = dayKey(Date.now(), data.cfg.tz);
     }
 
-    // Update time display
-    updateCurrentTimeDisplay();
-}
+    // ---------- lifecycle & sync ----------
 
-function updateCurrentTimeDisplay() {
-    const now = new Date();
-    const options = {
-        timeZone: selectedTimezone,
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
+    componentDidMount() {
+        this.mounted = true;
+        if (this.storageWarning) {
+            this.lastStorageWarning = Date.now();
+            this.flash('Can’t save: browser storage is full or blocked', 'over');
+        }
+        this.autoArchive();
+        this.iv = setInterval(this.tick, TICK_MS);
+        this.tick();
+        this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+        this.mq.addEventListener('change', this.onScheme);
+        window.addEventListener('storage', this.onStorage);
+        window.addEventListener('keydown', this.onKey);
+        window.addEventListener('resize', this.onResize);
+        window.addEventListener('pointerdown', unlockAudio, { passive: true });
+        window.addEventListener('keydown', unlockAudio);
+        document.addEventListener('visibilitychange', this.onVisible);
+        this.applyTheme();
+        this.armTimer();
+    }
+
+    componentWillUnmount() {
+        clearInterval(this.iv);
+        clearTimeout(this.toastTimer);
+        clearTimeout(this.endTimer);
+        this.mq.removeEventListener('change', this.onScheme);
+        window.removeEventListener('storage', this.onStorage);
+        window.removeEventListener('keydown', this.onKey);
+        window.removeEventListener('resize', this.onResize);
+        document.removeEventListener('visibilitychange', this.onVisible);
+    }
+
+    componentDidUpdate(_, prev) {
+        if (prev.cfg !== this.state.cfg || prev.systemDark !== this.state.systemDark) this.applyTheme();
+        if (prev.timer !== this.state.timer) this.armTimer();
+        const v = this.lastVals;
+        if (v) document.title = v.running ? `${v.time} · ${v.focus ? 'Focus' : 'Break'} · NoXcuse` : 'NoXcuse';
+    }
+
+    applyTheme() {
+        const { cfg, systemDark } = this.state;
+        const dark = cfg.theme === 'dark' || (cfg.theme === 'system' && systemDark);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = dark ? '#0e0f11' : '#f4f3ef';
+    }
+
+    onScheme = e => this.setState({ systemDark: e.matches });
+    onResize = () => this.setState({ vw: window.innerWidth, vh: window.innerHeight });
+
+    // Another tab wrote to storage: adopt its value.
+    onStorage = e => {
+        if (e.key === null) return this.setState(store.readAll());
+        const name = store.nameOfKey(e.key);
+        if (name) this.setState({ [name]: store.read(name) });
     };
-    const formatter = new Intl.DateTimeFormat('en-US', options);
-    currentTimeDisplay.textContent = `Current time: ${formatter.format(now)}`;
-}
 
-function startTimeDisplayUpdate() {
-    updateCurrentTimeDisplay();
-    if (timeDisplayInterval) clearInterval(timeDisplayInterval);
-    timeDisplayInterval = setInterval(updateCurrentTimeDisplay, 1000);
-}
+    onVisible = () => {
+        if (document.hidden) return;
+        this.setState({ ...store.readAll(), now: Date.now() });
+        this.tick();
+    };
 
-function stopTimeDisplayUpdate() {
-    if (timeDisplayInterval) {
-        clearInterval(timeDisplayInterval);
-        timeDisplayInterval = null;
-    }
-}
-
-function renderCalendar() {
-    const year = currentCalendarDate.getFullYear();
-    const month = currentCalendarDate.getMonth();
-    
-    // Set month/year header
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                        'July', 'August', 'September', 'October', 'November', 'December'];
-    currentMonth.textContent = `${monthNames[month]} ${year}`;
-    
-    // Get first day of month and total days
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // Get session data (use cache to avoid redundant parsing)
-    const sessionData = cachedDailySessions ||
-        (cachedDailySessions = JSON.parse(localStorage.getItem('noxcuse_daily_sessions')) || {});
-    const history = sessionData.history || {};
-    const today = getTodayDate();
-    
-    // Clear calendar
-    calendarDates.innerHTML = '';
-    
-    // Add empty cells for days before month starts
-    for (let i = 0; i < firstDay; i++) {
-        const emptyCell = document.createElement('div');
-        emptyCell.className = 'aspect-square';
-        calendarDates.appendChild(emptyCell);
-    }
-    
-    // Add days of month
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const sessions = dateStr === today ? sessionData.currentSessions : (history[dateStr] || 0);
-        
-        const dayCell = document.createElement('div');
-        dayCell.className = 'aspect-square flex flex-col items-center justify-center rounded-lg cursor-pointer transition-colors relative';
-        
-        // Today highlight
-        if (dateStr === today) {
-            dayCell.classList.add('bg-blue-600/20', 'border', 'border-blue-600');
-        } else {
-            dayCell.classList.add('hover:bg-neutral-800');
+    tick = () => {
+        const now = Date.now();
+        const t = this.state.timer;
+        if (t && t.status === 'running' && now >= t.endAt) this.finish();
+        const day = dayKey(now, this.state.cfg.tz);
+        if (day !== this.lastDay) {
+            this.lastDay = day;
+            this.autoArchive();
         }
-        
-        // Day number
-        const dayNum = document.createElement('div');
-        dayNum.className = 'text-sm font-medium';
-        dayNum.textContent = day;
-        
-        // Session indicator
-        if (sessions > 0) {
-            dayNum.classList.add('text-white');
-            
-            const indicator = document.createElement('div');
-            indicator.className = 'flex gap-0.5 mt-1';
-            
-            // Color based on session count (check overtime FIRST!)
-            let dotColor = 'bg-gray-600';
-            if (sessions > 16) {
-                dotColor = 'bg-rose-500'; // Overtime (17+)
-            } else if (sessions === 16) {
-                dotColor = 'bg-green-500'; // Full day (exactly 16)
-            } else if (sessions >= 8) {
-                dotColor = 'bg-green-400'; // Half day+ (8-15)
-            } else if (sessions > 0) {
-                dotColor = 'bg-green-300'; // Some work (1-7)
-            }
-            
-            // Show dots (max 3)
-            const dotCount = Math.min(3, Math.ceil(sessions / 6));
-            for (let i = 0; i < dotCount; i++) {
-                const dot = document.createElement('div');
-                dot.className = `w-1 h-1 rounded-full ${dotColor}`;
-                indicator.appendChild(dot);
-            }
-            
-            dayCell.appendChild(dayNum);
-            dayCell.appendChild(indicator);
-        } else {
-            dayNum.classList.add('text-gray-500');
-            dayCell.appendChild(dayNum);
-        }
-        
-        // Click to show details
-        dayCell.onclick = () => showDateDetails(dateStr, sessions);
-        
-        calendarDates.appendChild(dayCell);
-    }
-}
+        // repaint when the shown countdown changes; when idle, twice a minute (header date)
+        const cur = this.state.timer;
+        const running = cur && cur.status === 'running';
+        if (running ? this.leftOf(cur, now) !== this.leftOf(cur, this.state.now) : now - this.state.now >= 30000) this.setState({ now });
+    };
 
-function showDateDetails(dateStr, sessions) {
-    selectedDateStr = dateStr;
-    
-    // Format date
-    const date = new Date(dateStr + 'T00:00:00');
-    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    selectedDate.textContent = date.toLocaleDateString('en-US', options);
-    
-    // Session count
-    sessionCount.textContent = `${sessions} session${sessions !== 1 ? 's' : ''}`;
-    
-    // Render session dots
-    sessionDots.innerHTML = '';
-    const totalDots = Math.max(16, sessions);
-    
-    for (let i = 0; i < totalDots; i++) {
-        const dot = document.createElement('div');
-        
-        if (i < sessions) {
-            if (i < 16) {
-                dot.className = 'w-2 h-2 rounded-full bg-green-500';
-            } else {
-                dot.className = 'w-2 h-2 rounded-full bg-rose-500';
-            }
-        } else {
-            dot.className = 'w-2 h-2 rounded-full bg-neutral-700';
-        }
-        
-        sessionDots.appendChild(dot);
+    // ---------- toast ----------
+
+    flash = (text, k = 'info') => {
+        this.setState({ toast: { k, text } });
+        clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => this.setState({ toast: null }), 4000);
+    };
+
+    // ---------- timer ----------
+
+    timerOf(s = this.state) {
+        const t = s.timer;
+        if (!t) return { mode: 'focus', status: 'idle', dur: s.cfg.focus * 60 };
+        if (t.mode === 'focus' && t.status === 'idle') return { ...t, dur: s.cfg.focus * 60 };
+        return t;
     }
-    
-    // Get completed tasks for this date
-    const completedTasks = getCompletedTasksForDate(dateStr);
-    
-    if (completedTasks.length > 0) {
-        dateTasks.innerHTML = '';
-        completedTasks.forEach(({task, parent}) => {
-            const taskItem = document.createElement('div');
-            taskItem.className = 'text-sm text-gray-400 flex items-center gap-2';
-            
-            // Show parent task name if this is a subtask
-            const displayText = parent 
-                ? `${parent.text} › ${task.text}` 
-                : task.text;
-            
-            taskItem.innerHTML = `
-                <i class="fas fa-check-circle text-green-500"></i>
-                <span>${displayText}</span>
-            `;
-            dateTasks.appendChild(taskItem);
+
+    // Background tabs throttle the 250ms interval (to once a minute after a while),
+    // so also wake up exactly when the running timer ends.
+    armTimer(t = this.state.timer) {
+        clearTimeout(this.endTimer);
+        if (t && t.status === 'running') this.endTimer = setTimeout(this.tick, Math.max(0, t.endAt - Date.now()) + 30);
+    }
+
+    leftOf(t, now = Date.now()) {
+        if (t.status === 'running') return Math.max(0, Math.ceil((t.endAt - now) / 1000));
+        if (t.status === 'paused') return Math.ceil(this.leftMs(t) / 1000);
+        if (t.status === 'picking') return 0;
+        return t.dur;
+    }
+
+    leftMs(t) {
+        return t.leftMs != null ? t.leftMs : t.left * 1000;
+    }
+
+    setTimer(t) {
+        store.write('timer', t);
+        this.setState({ timer: t, now: Date.now() });
+    }
+
+    toggleRun = () => {
+        const t = this.timerOf();
+        const now = Date.now();
+        if (t.status === 'picking') return;
+        if (t.status === 'running') return this.setTimer({ mode: t.mode, status: 'paused', dur: t.dur, leftMs: Math.max(0, t.endAt - now), taskId: t.taskId ?? null });
+        const ms = t.status === 'paused' ? this.leftMs(t) : t.dur * 1000;
+        // a focus session is credited to the task that was "now" when it started
+        const first = store.read('tasks').find(x => !x.done);
+        const taskId = t.status === 'paused' ? t.taskId ?? null : t.mode === 'focus' && first ? first.id : null;
+        this.setTimer({ mode: t.mode, status: 'running', dur: t.dur, endAt: now + ms, taskId });
+    };
+
+    reset = () => {
+        const t = this.timerOf();
+        if (t.status === 'picking') return;
+        this.setTimer(t.mode === 'focus' ? null : { mode: 'break', status: 'idle', dur: t.dur });
+    };
+
+    stop = () => this.setTimer(null);
+
+    skipBreak = () => {
+        this.setTimer(null);
+        this.setState({ overlay: null });
+    };
+
+    startBreak = min => {
+        this.setTimer({ mode: 'break', status: 'running', dur: min * 60, endAt: Date.now() + min * 60 * 1000 });
+        this.setState({ overlay: null });
+    };
+
+    // The running timer reached zero. Safe to call from several tabs at once:
+    // the session id is derived from endAt, so it is only ever recorded once.
+    finish() {
+        const t = store.read('timer');
+        const now = Date.now();
+        if (!t || t.status !== 'running' || now < t.endAt) {
+            this.graceUsed = false;
+            return this.setState({ timer: t });
+        }
+        if (document.hidden && !this.graceUsed && now - t.endAt < 1500) {
+            // let a visible tab claim the completion (and play the sound) first
+            this.graceUsed = true;
+            clearTimeout(this.graceTimer);
+            this.graceTimer = setTimeout(() => this.finish(), 700);
+            return;
+        }
+        this.graceUsed = false;
+        const { cfg } = this.state;
+
+        if (t.mode === 'break') {
+            store.write('timer', null);
+            this.setState({ timer: null, now });
+            this.flash('Break over · back to focus');
+            if (cfg.sound) beep('break');
+            if (cfg.notify && away()) notify('Break over', 'Ready for the next focus session?');
+            return;
+        }
+
+        const sid = 's' + t.endAt;
+        let fresh = false;
+        const tasks = store.read('tasks');
+        const credit = (t.taskId && (tasks.find(x => x.id === t.taskId) || store.read('archive').find(x => x.id === t.taskId))) || tasks.find(x => !x.done);
+        const sessions = store.update('sessions', list => {
+            if (list.some(x => x.id === sid)) return list;
+            fresh = true;
+            return [...list, { id: sid, start: t.endAt - t.dur * 1000, end: t.endAt, taskId: credit ? credit.id : null, task: credit ? credit.title : '' }];
         });
-        dateTasksSection.style.display = 'block';
-    } else {
-        dateTasksSection.style.display = 'none';
+        const day = dayKey(t.endAt, cfg.tz);
+        const n = sessions.filter(x => dayKey(x.end, cfg.tz) === day).length + (this.state.legacy[day] || 0);
+        const kind = n === cfg.target ? 'target' : n > cfg.target ? 'over' : 'done';
+        const next = cfg.autoBreak
+            ? { mode: 'break', status: 'running', dur: (kind === 'target' ? cfg.long : cfg.short) * 60, endAt: now + (kind === 'target' ? cfg.long : cfg.short) * 60 * 1000 }
+            : { mode: 'focus', status: 'picking', dur: cfg.focus * 60 };
+        store.write('timer', next);
+        this.setState(cfg.autoBreak ? { sessions, timer: next, now } : { sessions, timer: next, now, overlay: null, confirmReset: false });
+        if (!fresh) return;
+        const text = kind === 'target' ? `Daily target hit · ${n}/${cfg.target}`
+            : kind === 'over' ? `Overtime +${n - cfg.target} · past your ${cfg.target}-session target`
+                : `Session ${pad(n)} done · ${n}/${cfg.target} today`;
+        this.flash(text, kind);
+        if (cfg.sound) beep(kind);
+        if (cfg.notify && away()) notify(kind === 'target' ? 'Daily target hit' : 'Session complete', text);
     }
-    
-    dateDetails.style.display = 'block';
-}
 
-// Helper function to get completed tasks for a specific date
-function getCompletedTasksForDate(dateStr) {
-    const completedTasks = [];
-    
-    function collectCompletedTasks(taskArray, parentTask = null) {
-        taskArray.forEach(task => {
-            if (task.completed && task.completedDate === dateStr) {
-                completedTasks.push({
-                    task: task,
-                    parent: parentTask
+    // ---------- tasks ----------
+
+    today() {
+        return dayKey(Date.now(), this.state.cfg.tz);
+    }
+
+    setTasks(fn) {
+        const tasks = store.update('tasks', fn);
+        this.setState({ tasks });
+        return tasks;
+    }
+
+    addTask = (title, subs = []) => {
+        const t = title.trim();
+        if (!t) return;
+        this.setTasks(list => [
+            ...list.filter(x => !x.done),
+            { id: store.uid(), title: t, done: false, doneAt: null, day: null, subs },
+            ...list.filter(x => x.done)
+        ]);
+    };
+
+    toggleTask = id => {
+        const now = Date.now();
+        const day = this.today();
+        this.setTasks(list => list.map(t => t.id !== id ? t
+            : t.done ? { ...t, done: false, doneAt: null, day: null } : { ...t, done: true, doneAt: now, day }));
+    };
+
+    removeTask = id => {
+        this.setState({ editing: null });
+        this.setTasks(list => list.filter(t => t.id !== id));
+    };
+
+    mapTask(id, fn) {
+        this.setTasks(list => list.map(t => (t.id === id ? fn(t) : t)));
+    }
+
+    toggleSub = (id, sid) => this.mapTask(id, t => ({ ...t, subs: t.subs.map(x => (x.id === sid ? { ...x, done: !x.done } : x)) }));
+
+    addSub = (id, text) => {
+        const v = text.trim();
+        if (!v) return;
+        this.mapTask(id, t => ({ ...t, subs: [...t.subs, { id: store.uid(), t: v, done: false }] }));
+        this.setState(s => ({ subDrafts: { ...s.subDrafts, [id]: '' }, expanded: { ...s.expanded, [id]: true } }));
+    };
+
+    removeSub = (id, sid) => {
+        this.setState({ editing: null });
+        this.mapTask(id, t => ({ ...t, subs: t.subs.filter(x => x.id !== sid) }));
+    };
+
+    moveTask = (fromId, toId) => {
+        this.setState({ drag: null });
+        if (!fromId || !toId || fromId === toId) return;
+        this.setTasks(list => {
+            const from = list.findIndex(t => t.id === fromId);
+            const to = list.findIndex(t => t.id === toId);
+            if (from < 0 || to < 0) return list;
+            const next = [...list];
+            const [it] = next.splice(from, 1);
+            next.splice(to, 0, it);
+            return next;
+        });
+    };
+
+    startEdit = (id, sub = null, val = '') => this.setState({ editing: { id, sub }, editVal: val });
+    cancelEdit = () => this.setState({ editing: null });
+
+    commitEdit = () => {
+        const ed = this.state.editing;
+        if (!ed) return;
+        const v = (this.state.editVal || '').trim();
+        this.setState({ editing: null });
+        if (ed.sub == null) {
+            if (v) this.mapTask(ed.id, t => ({ ...t, title: v }));
+        } else {
+            this.mapTask(ed.id, t => ({ ...t, subs: v ? t.subs.map(x => (x.id === ed.sub ? { ...x, t: v } : x)) : t.subs.filter(x => x.id !== ed.sub) }));
+        }
+    };
+
+    archiveDone = () => {
+        const now = Date.now();
+        const day = this.today();
+        let done = [];
+        this.setTasks(list => {
+            done = list.filter(t => t.done);
+            return list.filter(t => !t.done);
+        });
+        if (!done.length) return;
+        const archive = store.update('archive', a => [...done.map(t => ({ ...t, doneAt: t.doneAt ?? now, day: t.day || day })), ...a]);
+        this.setState({ archive });
+        this.flash(`Archived ${done.length} done`);
+    };
+
+    // Tasks finished on an earlier day move to the archive automatically.
+    autoArchive() {
+        const day = this.today();
+        const stale = store.read('tasks').filter(t => t.done && t.day && t.day < day);
+        if (!stale.length) return;
+        const ids = new Set(stale.map(t => t.id));
+        this.setTasks(list => list.filter(t => !ids.has(t.id)));
+        const archive = store.update('archive', a => [...stale.filter(t => !a.some(x => x.id === t.id)), ...a]);
+        this.setState({ archive });
+    }
+
+    restore = id => {
+        let item = null;
+        const archive = store.update('archive', a => {
+            item = a.find(x => x.id === id) || null;
+            return a.filter(x => x.id !== id);
+        });
+        this.setState({ archive });
+        if (!item) return;
+        const restored = { ...item, done: false, doneAt: null, day: null };
+        this.setTasks(list => [...list.filter(t => !t.done && t.id !== id), restored, ...list.filter(t => t.done && t.id !== id)]);
+        this.flash(`Restored “${item.title}”`);
+    };
+
+    // ---------- backlog ----------
+
+    setBacklog(fn) {
+        const backlog = store.update('backlog', fn);
+        this.setState({ backlog });
+    }
+
+    addBacklog = title => {
+        const t = title.trim();
+        if (!t) return;
+        this.setBacklog(list => [...list, { id: store.uid(), title: t, subs: [] }]);
+        this.setState({ bdraft: '' });
+    };
+
+    removeBacklog = id => this.setBacklog(list => list.filter(b => b.id !== id));
+
+    backlogToToday = id => {
+        let item = null;
+        this.setBacklog(list => {
+            item = list.find(b => b.id === id) || null;
+            return list.filter(b => b.id !== id);
+        });
+        if (item) this.addTask(item.title, item.subs.map(s => ({ ...s })));
+    };
+
+    taskToBacklog = id => {
+        let item = null;
+        this.setState({ editing: null });
+        this.setTasks(list => {
+            item = list.find(t => t.id === id) || null;
+            return list.filter(t => t.id !== id);
+        });
+        if (item) {
+            this.setBacklog(list => [...list, { id: item.id, title: item.title, subs: item.subs }]);
+            this.flash('Moved to backlog');
+        }
+    };
+
+    moveBacklog = (fromId, toId) => {
+        this.setState({ bdrag: null });
+        if (!fromId || !toId || fromId === toId) return;
+        this.setBacklog(list => {
+            const from = list.findIndex(b => b.id === fromId);
+            const to = list.findIndex(b => b.id === toId);
+            if (from < 0 || to < 0) return list;
+            const next = [...list];
+            const [it] = next.splice(from, 1);
+            next.splice(to, 0, it);
+            return next;
+        });
+    };
+
+    // ---------- settings & data ----------
+
+    setCfg = (k, v) => {
+        const cfg = store.update('cfg', c => ({ ...c, [k]: v }));
+        this.setState({ cfg });
+        if (k === 'notify' && v) {
+            requestNotify().then(p => {
+                if (p === 'granted') return;
+                this.setState({ cfg: store.update('cfg', c => ({ ...c, notify: false })) });
+                this.flash(p === 'unsupported' ? 'This browser has no notifications' : 'Notifications are blocked by the browser', 'over');
+            });
+        }
+        if (k === 'tz') this.lastDay = dayKey(Date.now(), cfg.tz);
+    };
+
+    exportData = () => {
+        const data = store.exportData();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+        a.download = `noxcuse-backup-${this.today()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+        this.flash('Backup exported');
+    };
+
+    importData = () => this.fileInput.current && this.fileInput.current.click();
+
+    onFile = e => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        file.text()
+            .then(text => {
+                const d = store.importData(JSON.parse(text));
+                this.setState({ ...store.readAll(), editing: null, confirmReset: false });
+                this.flash(`Imported ${d.tasks.length} tasks · ${d.archive.length} archived`);
+            })
+            .catch(() => this.flash('That file is not a NoXcuse backup', 'over'));
+    };
+
+    doReset = () => {
+        store.clearAll();
+        this.setState({ ...store.readAll(), overlay: null, confirmReset: false, editing: null, expanded: {}, subDrafts: {} });
+        this.flash('All data cleared');
+    };
+
+    // ---------- calendar ----------
+
+    shiftMonth = n => {
+        const [ty, tm] = splitKey(this.today());
+        const cur = this.state.cal || { y: ty, m: tm };
+        const next = addMonths(cur.y, cur.m, n);
+        if (next.y * 12 + next.m > ty * 12 + tm) return;
+        this.setState({ cal: next.y === ty && next.m === tm ? null : next, selDay: null });
+    };
+
+    pickDay = key => {
+        const [y, m] = splitKey(key);
+        const [ty, tm] = splitKey(this.today());
+        this.setState({ selDay: key, cal: y === ty && m === tm ? null : { y, m } });
+    };
+
+    // ---------- navigation & keys ----------
+
+    go = page => this.setState({ page, overlay: null, confirmReset: false });
+
+    toggleOverlay = name => this.setState(s => ({ overlay: s.overlay === name ? null : name, confirmReset: false }));
+
+    focusAdd = () => {
+        this.setState({ page: 'timer', overlay: null }, () => this.addInput.current && this.addInput.current.focus());
+    };
+
+    onKey = e => {
+        const device = deviceOf(this.state.vw);
+        if (device === 'mobile' || e.repeat) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const tg = e.target;
+        if (tg && (/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName) || tg.isContentEditable)) return;
+        const s = this.state;
+        const k = e.key;
+        if (k === ' ' && tg && tg.closest && tg.closest(NATIVE_SPACE)) return;
+        const t = this.timerOf();
+        if (t.status === 'picking' && pageFor(device, s.page) === 'timer') {
+            const pick = { 1: () => this.startBreak(s.cfg.short), 2: () => this.startBreak(s.cfg.long), 3: this.skipBreak }[k];
+            if (pick) {
+                e.preventDefault();
+                pick();
+            }
+            return;
+        }
+        if (k === 'Escape') {
+            if (s.editing) {
+                e.preventDefault();
+                this.cancelEdit();
+            } else if (s.overlay || s.confirmReset) {
+                e.preventDefault();
+                this.setState({ overlay: null, confirmReset: false });
+            }
+            return;
+        }
+        const map = {
+            ' ': this.toggleRun,
+            r: this.reset,
+            s: t.mode === 'focus' ? this.stop : this.skipBreak,
+            n: this.focusAdd,
+            t: () => this.go('timer'),
+            c: () => this.go('calendar'),
+            a: () => this.go('archive'),
+            b: () => this.toggleOverlay('backlog'),
+            ',': () => this.toggleOverlay('settings'),
+            '?': () => this.toggleOverlay('keys')
+        };
+        const fn = map[k.length === 1 ? k.toLowerCase() : k];
+        if (fn) {
+            e.preventDefault();
+            fn();
+        }
+    };
+
+    // ---------- derived data ----------
+
+    dayStats() {
+        const { sessions, legacy, cfg } = this.state;
+        const c = this.statsCache;
+        if (c && c.sessions === sessions && c.legacy === legacy && c.tz === cfg.tz) return c.value;
+        const byDay = new Map();
+        const spent = new Map();
+        for (const x of sessions) {
+            const d = dayKey(x.end, cfg.tz);
+            if (!byDay.has(d)) byDay.set(d, []);
+            byDay.get(d).push(x);
+            if (x.taskId) spent.set(x.taskId, (spent.get(x.taskId) || 0) + 1);
+        }
+        for (const list of byDay.values()) list.sort((a, b) => a.start - b.start);
+        const value = {
+            byDay,
+            spent,
+            count: d => (byDay.get(d) || []).length + (legacy[d] || 0),
+            minutes: d => (byDay.get(d) || []).reduce((m, x) => m + (x.end - x.start) / 60000, 0) + (legacy[d] || 0) * 25
+        };
+        this.statsCache = { sessions, legacy, tz: cfg.tz, value };
+        return value;
+    }
+
+    sizes(device) {
+        const { vw, vh } = this.state;
+        let dial;
+        let panelH = 0;
+        if (device === 'mobile') dial = Math.min(330, vw - 40, vh - 64 - 78 - 230);
+        else if (device === 'tablet') {
+            panelH = Math.round(Math.min(480, Math.max(320, vh * 0.42)));
+            dial = Math.min(440, vh - 64 - panelH - 190, vw - 64);
+        } else dial = Math.min(440, vh - 64 - 200, vw - 380 - 64);
+        dial = Math.max(200, Math.round(dial));
+        return { dial, panelH };
+    }
+
+    vals() {
+        const s = this.state;
+        const { cfg } = s;
+        const tz = cfg.tz;
+        const now = s.now;
+        const today = dayKey(now, tz);
+        const device = deviceOf(s.vw);
+        const page = pageFor(device, s.page);
+        const stats = this.dayStats();
+        const target = cfg.target;
+
+        // timer
+        const t = this.timerOf();
+        const focus = t.mode === 'focus';
+        const running = t.status === 'running';
+        const picking = t.status === 'picking';
+        const left = this.leftOf(t, now);
+        const remDeg = t.dur ? (left / t.dur) * 360 : 0;
+        const leds = Array.from({ length: 25 }, (_, i) => ({ deg: i * 14.4, on: i * 14.4 < remDeg - 0.01 }));
+        const n = stats.count(today);
+        const over = n >= target;
+        const strip = (count, live) => Array.from({ length: Math.max(target, count + (live ? 1 : 0)) }, (_, i) =>
+            i < count ? (i < target ? 'done' : 'over') : live && i === count ? (focus ? 'live' : 'live-break') : 'empty');
+
+        // tasks
+        const tasks = s.tasks;
+        const nowTask = tasks.find(x => !x.done) || null;
+        const doneCount = tasks.filter(x => x.done).length;
+        const openCount = tasks.length - doneCount;
+
+        const time = `${pad(Math.floor(left / 60))}:${pad(left % 60)}`;
+        const v = {
+            s, device, page, today, target, tz,
+            size: this.sizes(device),
+            focus, running, picking, left, time, leds,
+            idle: t.status === 'idle',
+            modeLabel: focus ? (running ? 'FOCUS' : t.status === 'idle' ? 'READY' : 'PAUSED') : (running ? 'BREAK' : 'BREAK · PAUSED'),
+            sessLabel: !focus ? 'STEP AWAY' : over ? `OVERTIME +${n - target + 1}` : `SESSION ${pad(n + 1)}`,
+            sessOver: focus && over,
+            runLabel: running ? 'Pause' : focus ? 'Start focus' : 'Resume break',
+            cells: strip(n, !picking),
+            sessCount: n,
+            focusedToday: fmtDuration(stats.minutes(today)),
+            showBreakPick: picking && (device === 'mobile' || page === 'timer'),
+            bpHead: n === target ? `DAILY TARGET HIT · ${n}/${target}` : n > target ? `OVERTIME +${n - target}` : `SESSION ${pad(n)} COMPLETE`,
+            bpOver: n > target,
+            bpTitle: n === target ? 'Target hit. Take the long break.' : n > target ? 'You’re past your target. Rest.' : 'Take a break.',
+            bpCells: strip(n, false),
+            tasks, nowTask, doneCount, openCount,
+            spentOf: id => stats.spent.get(id) || 0,
+            dateTitle: dayTitle(today),
+            dateShort: dayLabel(today).split(' ').slice(0, 3).join(' ')
+        };
+        if (page === 'calendar') Object.assign(v, this.calendarVals(stats, today, target));
+        if (page === 'archive' || page === 'more') Object.assign(v, this.archiveVals(today));
+        this.lastVals = v;
+        return v;
+    }
+
+    calendarVals(stats, today, target) {
+        const s = this.state;
+        const tz = s.cfg.tz;
+        const [ty, tm, td] = splitKey(today);
+        const { y, m } = s.cal || { y: ty, m: tm };
+        const isCur = y === ty && m === tm;
+        const nDays = daysIn(y, m);
+        const lastDay = isCur ? td : nDays;
+        const counts = Array.from({ length: lastDay }, (_, i) => stats.count(keyOf(y, m, i + 1)));
+        const total = counts.reduce((a, b) => a + b, 0);
+        const hitDays = counts.filter(c => c >= target).length;
+        const best = Math.max(0, ...counts);
+        const bestDay = counts.indexOf(best) + 1;
+        let minutes = 0;
+        for (let d = 1; d <= lastDay; d++) minutes += stats.minutes(keyOf(y, m, d));
+
+        // consecutive days at target, ending today (today may still be in progress)
+        let streak = 0;
+        let k = today;
+        if (stats.count(k) < target) k = addDays(k, -1);
+        for (let guard = 0; guard < 3660 && stats.count(k) >= target; guard++) {
+            streak++;
+            k = addDays(k, -1);
+        }
+
+        const stat = [
+            { l: 'SESSIONS', v: String(total), sub: `avg ${(total / lastDay).toFixed(1)} / day` },
+            { l: 'FOCUSED', v: fmtDuration(minutes), sub: isCur ? 'this month' : MONTHS[m - 1] },
+            { l: 'TARGET HIT', v: `${hitDays}/${lastDay}`, sub: isCur ? 'days so far' : 'days' },
+            { l: 'STREAK', v: `${streak} ${streak === 1 ? 'day' : 'days'}`, sub: best ? `best: ${best} on ${bestDay} ${MON3[m - 1]}` : 'no sessions yet' }
+        ];
+
+        // timeline (06:00–24:00 unless something ran earlier)
+        // a session that started before midnight is drawn from 00:00 on the day it ended
+        const place = (x, key) => {
+            const sameDay = dayKey(x.start, tz) === key;
+            const startMin = sameDay ? minuteOfDay(x.start, tz) : 0;
+            const len = sameDay ? (x.end - x.start) / 60000 : minuteOfDay(x.end, tz);
+            return { startMin, len: Math.max(1, Math.min(len, 24 * 60 - startMin)) };
+        };
+        let startH = 6;
+        for (let d = 1; d <= lastDay && startH; d++) {
+            const key = keyOf(y, m, d);
+            if ((stats.byDay.get(key) || []).some(x => place(x, key).startMin < startH * 60)) startH = 0;
+        }
+        const span = (24 - startH) * 60;
+        const hours = [];
+        for (let hr = startH; hr <= 24; hr += 3) hours.push({ l: ((hr - startH) * 60 / span) * 100, t: `${pad(hr % 24)}:00` });
+
+        const selKey = s.selDay && s.selDay.startsWith(`${y}-${pad(m)}-`) && +s.selDay.slice(8) <= lastDay ? s.selDay : keyOf(y, m, lastDay);
+        const rows = [];
+        for (let d = lastDay; d >= 1; d--) {
+            const key = keyOf(y, m, d);
+            const list = stats.byDay.get(key) || [];
+            const c = stats.count(key);
+            const legacyN = s.legacy[key] || 0;
+            rows.push({
+                key,
+                name: `${DOW3[dowOf(y, m, d)]} ${pad(d)}`,
+                tot: `${c}/${target}`,
+                hit: c >= target && c > 0,
+                any: c > 0,
+                today: key === today,
+                sel: key === selKey,
+                legacyN,
+                blocks: list.map((x, j) => {
+                    const { startMin, len } = place(x, key);
+                    return {
+                        l: Math.max(0, (startMin - startH * 60) / span) * 100,
+                        w: (len / span) * 100,
+                        over: j + legacyN >= target,
+                        tip: `${hm(x.start, tz)}–${hm(x.end, tz)} · ${x.task || 'No task'}`
+                    };
+                })
+            });
+        }
+
+        const sel = selKey;
+        const selN = stats.count(sel);
+        const groups = [];
+        for (const x of stats.byDay.get(sel) || []) {
+            const g = groups[groups.length - 1];
+            const label = x.task || 'No task';
+            if (g && g.task === label) {
+                g.n++;
+                g.to = hm(x.end, tz);
+            } else groups.push({ task: label, from: hm(x.start, tz), to: hm(x.end, tz), n: 1 });
+        }
+        const completed = [
+            ...s.archive.filter(a => a.day === sel),
+            ...s.tasks.filter(t => t.done && t.day === sel)
+        ].sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0)).map(a => ({ title: a.title, at: a.doneAt ? hm(a.doneAt, tz) : '' }));
+
+        const scaleMax = Math.max(target, ...Array.from({ length: 14 }, (_, i) => stats.count(addDays(keyOf(y, m, lastDay), i - 13)))) + 1;
+        const bars = Array.from({ length: 14 }, (_, i) => {
+            const key = addDays(keyOf(y, m, lastDay), i - 13);
+            const c = stats.count(key);
+            return { key, d: +key.slice(8), h: (c / scaleMax) * 100, kind: c > target ? 'over' : c >= target ? 'hit' : 'under', sel: key === sel };
+        });
+
+        return {
+            cal: {
+                y, m, isCur, monthLabel: `${MONTHS[m - 1]} ${y}`, monthShort: MONTHS[m - 1],
+                stats: stat, hours, rows, bars, tgtPct: (target / scaleMax) * 100,
+                sel: {
+                    key: sel,
+                    name: dayLabel(sel) + (sel === today ? ' · TODAY' : ''),
+                    n: selN,
+                    status: !selN ? 'No sessions' : selN < target ? `${target - selN} short of target` : selN === target ? 'Target hit' : `Target hit · +${selN - target} overtime`,
+                    tone: !selN ? 'muted' : selN < target ? 'dim' : selN === target ? 'accent' : 'danger',
+                    cells: Array.from({ length: Math.max(target, selN) }, (_, i) => (i < selN ? (i < target ? 'done' : 'over') : 'empty')),
+                    focused: `${fmtDuration(stats.minutes(sel))} focused`,
+                    log: groups.map(g => ({ ...g, span: g.n > 1 ? `${g.from}–${g.to}` : g.from, cnt: `${g.n}×` })),
+                    legacyN: s.legacy[sel] || 0,
+                    completed
+                }
+            }
+        };
+    }
+
+    archiveVals(today) {
+        const s = this.state;
+        const tz = s.cfg.tz;
+        const q = s.aq.trim().toLowerCase();
+        const sc = s.ascope;
+        const mode = s.agroup;
+        const ymd = a => splitKey(a.day);
+        const sorted = [...s.archive].sort((a, b) => b.day.localeCompare(a.day) || (b.doneAt || 0) - (a.doneAt || 0));
+        const inScope = a => {
+            if (!sc) return true;
+            const [y, m] = ymd(a);
+            return y === sc.y && (sc.m == null || m === sc.m);
+        };
+        const found = sorted.filter(a => inScope(a) && (!q || a.title.toLowerCase().includes(q)));
+        const gmap = new Map();
+        for (const a of found) {
+            const [y, m, d] = ymd(a);
+            const key = mode === 'day' ? a.day : mode === 'month' ? `${y}-${m}` : String(y);
+            if (!gmap.has(key)) {
+                gmap.set(key, {
+                    key,
+                    date: mode === 'day' ? dayLabel(a.day) + (a.day === today ? ' · TODAY' : '') : mode === 'month' ? `${MONTHS[m - 1].toUpperCase()} ${y}` : String(y),
+                    rows: []
                 });
             }
-            // Check subtasks too
-            if (task.subtasks && task.subtasks.length > 0) {
-                collectCompletedTasks(task.subtasks, task);
-            }
-        });
-    }
-    
-    collectCompletedTasks(tasks);
-    return completedTasks;
-}
-
-function navigateMonth(direction) {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
-    renderCalendar();
-    dateDetails.style.display = 'none';
-}
-
-// Archive functions
-function renderArchive() {
-    archiveList.innerHTML = '';
-    const today = getTodayDate();
-    
-    // Get all archived tasks (completed before today)
-    const archivedTasks = [];
-    
-    function collectArchivedTasks(taskArray, parentTask = null) {
-        taskArray.forEach(task => {
-            if (task.completed && task.completedDate && task.completedDate < today) {
-                archivedTasks.push({
-                    task: task,
-                    parent: parentTask
-                });
-            }
-            // Check subtasks
-            if (task.subtasks && task.subtasks.length > 0) {
-                collectArchivedTasks(task.subtasks, task);
-            }
-        });
-    }
-    
-    collectArchivedTasks(tasks);
-    
-    if (archivedTasks.length === 0) {
-        archiveList.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No archived tasks</p>';
-        return;
-    }
-    
-    // Group by date
-    const groupedByDate = {};
-    archivedTasks.forEach(({task, parent}) => {
-        const date = task.completedDate;
-        if (!groupedByDate[date]) {
-            groupedByDate[date] = [];
-        }
-        groupedByDate[date].push({task, parent});
-    });
-    
-    // Sort dates (newest first)
-    const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
-    
-    // Render grouped tasks
-    sortedDates.forEach(dateStr => {
-        // Date header
-        const date = new Date(dateStr + 'T00:00:00');
-        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-        const dateHeader = document.createElement('div');
-        dateHeader.className = 'text-sm font-semibold text-gray-400 mb-2 mt-4 first:mt-0';
-        dateHeader.textContent = date.toLocaleDateString('en-US', options);
-        archiveList.appendChild(dateHeader);
-        
-        // Tasks for this date
-        groupedByDate[dateStr].forEach(({task, parent}) => {
-            const taskDiv = document.createElement('div');
-            taskDiv.className = 'bg-neutral-800 border border-neutral-700 rounded-lg p-3 mb-2 hover:border-neutral-600';
-            
-            const content = document.createElement('div');
-            content.className = 'flex items-center gap-3';
-            
-            // Checkmark icon
-            const icon = document.createElement('div');
-            icon.className = 'text-green-500';
-            icon.innerHTML = '<i class="fas fa-check-circle"></i>';
-            
-            // Task text with parent info if subtask
-            const text = document.createElement('span');
-            text.className = 'flex-1 text-gray-300 text-sm';
-            
-            // Show parent task name if this is a subtask
-            if (parent) {
-                text.innerHTML = `<span class="text-gray-500">${parent.text} ›</span> ${task.text}`;
-            } else {
-                text.textContent = task.text;
-            }
-            
-            content.appendChild(icon);
-            content.appendChild(text);
-            
-            // Restore button - ONLY for main tasks (not subtasks)
-            if (!parent) {
-                const uncompleteBtn = document.createElement('button');
-                uncompleteBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs';
-                uncompleteBtn.innerHTML = '<i class="fas fa-undo"></i>';
-                uncompleteBtn.title = 'Restore to Tasks';
-                uncompleteBtn.onclick = () => uncompleteTask(task.id);
-                content.appendChild(uncompleteBtn);
-            }
-            
-            // Delete button
-            const delBtn = document.createElement('button');
-            delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2 py-1 rounded text-white text-xs';
-            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
-            delBtn.onclick = () => {
-                deleteTask(task.id);
-                renderArchive();
-            };
-            
-            content.appendChild(delBtn);
-            taskDiv.appendChild(content);
-            archiveList.appendChild(taskDiv);
-        });
-    });
-}
-
-function uncompleteTask(taskId) {
-    const task = findTask(taskId);
-    if (task) {
-        task.completed = false;
-        task.completedDate = null;
-        
-        // Also uncomplete all subtasks
-        if (task.subtasks && task.subtasks.length > 0) {
-            task.subtasks.forEach(subtask => {
-                subtask.completed = false;
-                subtask.completedDate = null;
+            const ix = q ? a.title.toLowerCase().indexOf(q) : -1;
+            gmap.get(key).rows.push({
+                id: a.id,
+                pre: ix < 0 ? a.title : a.title.slice(0, ix),
+                hit: ix < 0 ? '' : a.title.slice(ix, ix + q.length),
+                post: ix < 0 ? '' : a.title.slice(ix + q.length),
+                when: mode === 'day' ? '' : `${d} ${MON3[m - 1]}`,
+                meta: [a.subs.length ? `${a.subs.length} subtask${a.subs.length === 1 ? '' : 's'}` : '', a.doneAt ? hm(a.doneAt, tz) : ''].filter(Boolean).join(' · ')
             });
         }
-        
-        saveTasks();
-        renderTasks();
-        renderArchive();
-    }
-}
-
-function addBacklogItem(text, parentId = null) {
-    if (!text.trim()) return;
-    
-    const item = {
-        id: generateId(),
-        text: text.trim(),
-        subtasks: [],
-        parentId: parentId
-    };
-    
-    if (parentId) {
-        const parentItem = backlog.find(b => b.id === parentId);
-        if (parentItem) {
-            parentItem.subtasks.push(item);
-        }
-    } else {
-        backlog.push(item);
-    }
-    
-    saveBacklog();
-    renderBacklog();
-}
-
-function deleteBacklogItem(id) {
-    function removeFromArray(arr) {
-        for (let i = 0; i < arr.length; i++) {
-            if (arr[i].id === id) {
-                arr.splice(i, 1);
-                return true;
-            }
-            if (arr[i].subtasks && arr[i].subtasks.length > 0) {
-                if (removeFromArray(arr[i].subtasks)) return true;
-            }
-        }
-        return false;
-    }
-    
-    removeFromArray(backlog);
-    saveBacklog();
-    renderBacklog();
-}
-
-function moveToTasks(id) {
-    const item = findBacklogItem(id);
-    if (!item) return;
-    
-    // Add to tasks with all subtasks
-    const newTask = {
-        id: generateId(),
-        text: item.text,
-        completed: false,
-        subtasks: item.subtasks.map(sub => ({
-            id: generateId(),
-            text: sub.text,
-            completed: false,
-            subtasks: [],
-            parentId: null
-        }))
-    };
-    
-    tasks.push(newTask);
-    saveTasks();
-    renderTasks();
-    
-    // Remove from backlog
-    deleteBacklogItem(id);
-}
-
-function moveTaskToBacklog(id) {
-    const task = findTask(id);
-    if (!task) return;
-    
-    // Add to backlog with all subtasks
-    const newBacklogItem = {
-        id: generateId(),
-        text: task.text,
-        subtasks: task.subtasks.map(sub => ({
-            id: generateId(),
-            text: sub.text,
-            subtasks: [],
-            parentId: null
-        }))
-    };
-    
-    backlog.push(newBacklogItem);
-    saveBacklog();
-    renderBacklog();
-    
-    // Remove from tasks
-    deleteTask(id);
-}
-
-function findBacklogItem(id, itemArray = backlog) {
-    for (let item of itemArray) {
-        if (item.id === id) return item;
-        if (item.subtasks && item.subtasks.length > 0) {
-            const found = findBacklogItem(id, item.subtasks);
-            if (found) return found;
-        }
-    }
-    return null;
-}
-
-function findTask(id, taskArray = tasks) {
-    for (let task of taskArray) {
-        if (task.id === id) return task;
-        if (task.subtasks.length > 0) {
-            const found = findTask(id, task.subtasks);
-            if (found) return found;
-        }
-    }
-    return null;
-}
-
-function addTask(text, parentId = null) {
-    if (!text.trim()) return;
-    
-    const task = {
-        id: generateId(),
-        text: text.trim(),
-        completed: false,
-        completedDate: null,
-        subtasks: [],
-        parentId: parentId
-    };
-
-    if (parentId) {
-        const parentTask = findTask(parentId);
-        if (parentTask) parentTask.subtasks.push(task);
-    } else {
-        tasks.push(task);
-    }
-
-    saveTasks();
-    renderTasks();
-}
-
-function deleteTask(id) {
-    function removeFromArray(arr) {
-        for (let i = 0; i < arr.length; i++) {
-            if (arr[i].id === id) {
-                arr.splice(i, 1);
-                return true;
-            }
-            if (arr[i].subtasks.length > 0) {
-                if (removeFromArray(arr[i].subtasks)) return true;
-            }
-        }
-        return false;
-    }
-    
-    removeFromArray(tasks);
-    saveTasks();
-    renderTasks();
-}
-
-function toggleTask(id) {
-    const task = findTask(id);
-    if (task) {
-        task.completed = !task.completed;
-        
-        // Set completedDate when task is completed
-        if (task.completed) {
-            task.completedDate = getTodayDate();
-        } else {
-            task.completedDate = null;
-        }
-        
-        // If this is a main task with subtasks, toggle all subtasks too
-        if (task.subtasks && task.subtasks.length > 0) {
-            task.subtasks.forEach(subtask => {
-                // Only update subtasks that are not yet completed (preserve their completedDate)
-                if (!subtask.completed) {
-                    subtask.completed = task.completed;
-                    subtask.completedDate = task.completed ? getTodayDate() : null;
-                }
-            });
-        }
-        
-        saveTasks();
-        renderTasks();
-    }
-}
-
-function toggleCollapse(taskId) {
-    if (collapsedTasks.has(taskId)) {
-        collapsedTasks.delete(taskId);
-    } else {
-        collapsedTasks.add(taskId);
-    }
-    renderTasks();
-}
-
-// Timer
-function formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
-
-function saveTimerState(running) {
-    const state = { isBreak, running };
-    if (running) {
-        state.endAt = Date.now() + (timeLeft * 1000);
-    } else {
-        state.timeLeft = timeLeft;
-    }
-    localStorage.setItem('noxcuse_timer', JSON.stringify(state));
-}
-
-function clearTimerState() {
-    localStorage.removeItem('noxcuse_timer');
-}
-
-function syncTimerState(saved) {
-    if (!saved) {
-        if (isRunning) stopTimer(true);
-        timeLeft = 25 * 60;
-        isBreak = false;
-        updateTimerDisplay();
-        timerControls.style.display = 'flex';
-        breakButtons.style.display = 'none';
-        cancelBreakContainer.style.display = 'none';
-        return;
-    }
-
-    if (saved.completed) {
-        if (isRunning) stopTimer(true);
-        timeLeft = 25 * 60;
-        isBreak = false;
-        updateTimerDisplay();
-        if (!saved.isBreak) {
-            timerControls.style.display = 'none';
-            breakButtons.style.display = 'flex';
-            cancelBreakContainer.style.display = 'none';
-        } else {
-            timerControls.style.display = 'flex';
-            breakButtons.style.display = 'none';
-            cancelBreakContainer.style.display = 'none';
-        }
-        return;
-    }
-
-    isBreak = saved.isBreak;
-
-    if (isBreak) {
-        breakButtons.style.display = 'none';
-        timerControls.style.display = 'none';
-        cancelBreakContainer.style.display = 'flex';
-    }
-
-    if (saved.running) {
-        timeLeft = Math.max(0, Math.round((saved.endAt - Date.now()) / 1000));
-        updateTimerDisplay();
-        if (!isRunning) startTimer(true);
-    } else {
-        if (isRunning) stopTimer(true);
-        timeLeft = saved.timeLeft;
-        updateTimerDisplay();
-    }
-}
-
-function restoreTimer() {
-    const saved = JSON.parse(localStorage.getItem('noxcuse_timer'));
-    if (!saved) return;
-
-    if (saved.completed) {
-        // Timer completed (possibly in another tab)
-        if (!saved.isBreak) {
-            timerControls.style.display = 'none';
-            breakButtons.style.display = 'flex';
-        }
-        return;
-    }
-
-    isBreak = saved.isBreak;
-
-    if (isBreak) {
-        breakButtons.style.display = 'none';
-        timerControls.style.display = 'none';
-        cancelBreakContainer.style.display = 'flex';
-    }
-
-    if (!saved.running) {
-        // Was paused, just restore display
-        timeLeft = saved.timeLeft;
-        updateTimerDisplay();
-        return;
-    }
-
-    const remaining = Math.round((saved.endAt - Date.now()) / 1000);
-
-    if (remaining <= 0) {
-        // Timer finished while tab was closed
-        localStorage.setItem('noxcuse_timer', JSON.stringify({ completed: true, isBreak }));
-        timeLeft = 0;
-        handleTimerComplete();
-    } else {
-        timeLeft = remaining;
-        updateTimerDisplay();
-        startTimer(true);
-    }
-}
-
-function updateTimerDisplay() {
-    const timeString = formatTime(timeLeft);
-    timerDisplay.textContent = timeString;
-
-    if (isRunning) {
-        document.title = `${timeString} - NoXcuse`;
-    } else {
-        document.title = 'NoXcuse';
-    }
-}
-
-function startTimer(skipSave) {
-    if (isRunning) return;
-
-    if (!skipSave) saveTimerState(true);
-
-    isRunning = true;
-    startBtn.disabled = true;
-    startBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    stopBtn.disabled = false;
-    stopBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-neutral-800', 'hover:bg-neutral-700');
-    stopBtn.classList.add('bg-rose-500', 'hover:bg-rose-400', 'text-white');
-
-    timerInterval = setInterval(() => {
-        timeLeft--;
-        updateTimerDisplay();
-
-        if (timeLeft <= 0) {
-            localStorage.setItem('noxcuse_timer', JSON.stringify({ completed: true, isBreak }));
-            stopTimer(true);
-            handleTimerComplete();
-        }
-    }, 1000);
-}
-
-function stopTimer(skipSave) {
-    clearInterval(timerInterval);
-    if (isRunning && !skipSave) {
-        saveTimerState(false); // Save paused state
-    }
-    isRunning = false;
-    startBtn.disabled = false;
-    startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-    stopBtn.disabled = true;
-    stopBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-neutral-800', 'hover:bg-neutral-700');
-    stopBtn.classList.remove('bg-rose-500', 'hover:bg-rose-400', 'text-white');
-}
-
-function resetTimer() {
-    stopTimer(true);
-    clearTimerState();
-    timeLeft = 25 * 60;
-    isBreak = false;
-    updateTimerDisplay();
-
-    timerControls.style.display = 'flex';
-    breakButtons.style.display = 'none';
-    cancelBreakContainer.style.display = 'none';
-}
-
-function handleTimerComplete() {
-    if (!isBreak) {
-        currentSessions++;
-        saveDailySessions();
-        updateSessionsDisplay();
-
-        timerControls.style.display = 'none';
-        breakButtons.style.display = 'flex';
-
-        showNotification(
-            'Pomodoro Complete! 🎉',
-            'Great work! Time to take a break.',
-            'fa-check-circle',
-            'bg-green-600'
-        );
-    } else {
-        timeLeft = 25 * 60;
-        isBreak = false;
-
-        cancelBreakContainer.style.display = 'none';
-        timerControls.style.display = 'flex';
-
-        updateTimerDisplay();
-
-        showNotification(
-            'Break Complete! 💪',
-            'Ready for the next pomodoro session?',
-            'fa-play-circle',
-            'bg-blue-600'
-        );
-    }
-}
-
-function startBreak(minutes) {
-    timeLeft = minutes * 60;
-    isBreak = true;
-    updateTimerDisplay();
-
-    breakButtons.style.display = 'none';
-    timerControls.style.display = 'none';
-    cancelBreakContainer.style.display = 'flex';
-
-    startTimer();
-}
-
-function cancelBreak() {
-    stopTimer(true);
-    clearTimerState();
-    timeLeft = 25 * 60;
-    isBreak = false;
-    updateTimerDisplay();
-
-    cancelBreakContainer.style.display = 'none';
-    timerControls.style.display = 'flex';
-}
-
-function skipBreak() {
-    clearTimerState();
-    timeLeft = 25 * 60;
-    isBreak = false;
-    updateTimerDisplay();
-
-    breakButtons.style.display = 'none';
-    timerControls.style.display = 'flex';
-}
-
-function updateSessionsDisplay() {
-    sessionsDisplay.innerHTML = '';
-    
-    // Show at least 16 dots (normal working hours)
-    // If overtime (>16), show all completed sessions
-    const totalDotsToShow = Math.max(16, currentSessions);
-    
-    for (let i = 0; i < totalDotsToShow; i++) {
-        const dot = document.createElement('div');
-        
-        if (i < currentSessions) {
-            // Completed sessions
-            if (i < 16) {
-                // Normal sessions (1-16): green
-                dot.className = 'w-2 h-2 rounded-full bg-green-500';
-            } else {
-                // Overtime sessions (17+): rose (pastel red - soft but saturated)
-                dot.className = 'w-2 h-2 rounded-full bg-rose-500';
-            }
-        } else {
-            // Incomplete sessions: gray
-            dot.className = 'w-2 h-2 rounded-full bg-neutral-700';
-        }
-        
-        sessionsDisplay.appendChild(dot);
-    }
-}
-
-// Render Backlog
-function renderBacklog() {
-    // Destroy existing sortable instances to prevent memory leak
-    if (backlogSortable) {
-        backlogSortable.destroy();
-        backlogSortable = null;
-    }
-    backlogSubtaskSortables.forEach(sortable => sortable.destroy());
-    backlogSubtaskSortables = [];
-
-    backlogList.innerHTML = '';
-    backlog.forEach(item => {
-        const isCollapsed = collapsedBacklog.has(item.id);
-
-        // Create container for main item + subtasks (similar to task structure)
-        const itemContainer = document.createElement('div');
-        itemContainer.className = 'backlog-container mb-2';
-        itemContainer.setAttribute('data-id', item.id);
-
-        // Add main item
-        const mainElement = createBacklogElement(item, false, isCollapsed);
-        mainElement.classList.remove('mb-2');
-        itemContainer.appendChild(mainElement);
-
-        // Add subtasks container
-        if (item.subtasks && item.subtasks.length > 0 && !isCollapsed) {
-            const subtasksContainer = document.createElement('div');
-            subtasksContainer.className = 'backlog-subtasks-container';
-            subtasksContainer.setAttribute('data-parent-id', item.id);
-
-            item.subtasks.forEach((subitem, index) => {
-                const isLast = index === item.subtasks.length - 1;
-                const subElement = createBacklogElement(subitem, true, false, item.id, isLast);
-                subtasksContainer.appendChild(subElement);
-            });
-
-            itemContainer.appendChild(subtasksContainer);
-        }
-
-        backlogList.appendChild(itemContainer);
-    });
-
-    // Initialize sortable for main backlog items (store reference for cleanup)
-    backlogSortable = new Sortable(backlogList, {
-        animation: 150,
-        handle: '.backlog-drag-handle',
-        sort: true,
-        draggable: '.backlog-container',
-        onEnd: function(evt) {
-            // Reorder backlog based on container order
-            const containers = Array.from(backlogList.querySelectorAll('.backlog-container'));
-            const newOrder = [];
-
-            containers.forEach(container => {
-                const id = container.getAttribute('data-id');
-                const item = backlog.find(b => b.id === id);
-                if (item) {
-                    newOrder.push(item);
-                }
-            });
-
-            backlog = newOrder;
-            saveBacklog();
-        }
-    });
-
-    // Initialize sortable for subtasks within each backlog item
-    const subtaskContainers = document.querySelectorAll('.backlog-subtasks-container');
-    subtaskContainers.forEach(container => {
-        const sortable = new Sortable(container, {
-            animation: 150,
-            handle: '.backlog-drag-handle',
-            ghostClass: 'sortable-ghost',
-            onEnd: function(evt) {
-                const parentId = container.getAttribute('data-parent-id');
-                const parentItem = backlog.find(b => b.id === parentId);
-
-                if (parentItem) {
-                    const subtaskElements = Array.from(container.children);
-                    const newSubtaskOrder = [];
-
-                    subtaskElements.forEach(el => {
-                        const subtaskId = el.getAttribute('data-id');
-                        const subtask = parentItem.subtasks.find(s => s.id === subtaskId);
-                        if (subtask) {
-                            newSubtaskOrder.push(subtask);
-                        }
-                    });
-
-                    parentItem.subtasks = newSubtaskOrder;
-                    saveBacklog();
-                    renderBacklog(); // Re-render to update isLast margin classes
-                }
-            }
-        });
-        backlogSubtaskSortables.push(sortable);
-    });
-}
-
-function toggleBacklogCollapse(itemId) {
-    if (collapsedBacklog.has(itemId)) {
-        collapsedBacklog.delete(itemId);
-    } else {
-        collapsedBacklog.add(itemId);
-    }
-    renderBacklog();
-}
-
-function createBacklogElement(item, isSubitem = false, isCollapsed = false, parentId = null, isLast = false) {
-    const div = document.createElement('div');
-    
-    const subtaskClass = isSubitem 
-        ? (isLast ? 'backlog-subtask border-l-2 border-neutral-700 ml-6 mt-2 mb-10 pl-4' : 'backlog-subtask border-l-2 border-neutral-700 ml-6 mt-2 mb-2 pl-4')
-        : 'mb-2';
-    
-    div.className = `bg-neutral-800 border border-neutral-700 rounded-lg p-3 hover:border-neutral-600 ${subtaskClass}`;
-    div.setAttribute('data-id', item.id);
-    
-    const content = document.createElement('div');
-    content.className = 'flex items-center gap-3';
-    
-    // Drag handle
-    const dragHandle = document.createElement('div');
-    dragHandle.className = 'backlog-drag-handle text-gray-500 hover:text-gray-300 text-sm cursor-grab';
-    dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
-    
-    content.appendChild(dragHandle);
-    
-    // Text
-    const text = document.createElement('span');
-    text.className = 'flex-1 text-gray-300 text-sm cursor-text hover:text-white outline-none';
-    text.contentEditable = 'true';
-    text.textContent = item.text;
-    text.setAttribute('spellcheck', 'false');
-    
-    text.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            text.blur();
-        }
-    });
-    
-    text.addEventListener('blur', () => {
-        const newText = text.textContent.trim();
-        if (newText && newText !== item.text) {
-            item.text = newText;
-            saveBacklog();
-        } else if (!newText) {
-            text.textContent = item.text;
-        }
-    });
-    
-    content.appendChild(text);
-    
-    // Expand/collapse button (for items with subtasks) - ON THE RIGHT
-    if (!isSubitem && item.subtasks && item.subtasks.length > 0) {
-        const expandBtn = document.createElement('button');
-        expandBtn.className = 'w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-300';
-        expandBtn.innerHTML = isCollapsed ? '<i class="fas fa-chevron-right"></i>' : '<i class="fas fa-chevron-down"></i>';
-        expandBtn.onclick = () => toggleBacklogCollapse(item.id);
-        content.appendChild(expandBtn);
-    } else if (!isSubitem) {
-        const spacer = document.createElement('div');
-        spacer.className = 'w-6';
-        content.appendChild(spacer);
-    }
-    
-    // Move to tasks button
-    const moveBtn = document.createElement('button');
-    moveBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs';
-    moveBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
-    moveBtn.title = 'Move to tasks';
-    moveBtn.onclick = () => moveToTasks(item.id);
-    
-    // Delete button
-    const delBtn = document.createElement('button');
-    delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2 py-1 rounded text-white text-xs';
-    delBtn.innerHTML = '<i class="fas fa-trash"></i>';
-    delBtn.onclick = () => deleteBacklogItem(item.id);
-    
-    content.appendChild(moveBtn);
-    content.appendChild(delBtn);
-    div.appendChild(content);
-    
-    // Add sub-item button (only for main items)
-    if (!isSubitem) {
-        const subInputContainer = document.createElement('div');
-        subInputContainer.className = 'flex gap-2 mt-3';
-        subInputContainer.style.display = 'none';
-        
-        const subInput = document.createElement('input');
-        subInput.type = 'text';
-        subInput.placeholder = 'Enter sub-item...';
-        subInput.className = 'flex-1 bg-neutral-700 border border-neutral-600 px-3 py-1.5 rounded-md text-gray-200 placeholder-gray-500 text-sm';
-        
-        const addSubBtn = document.createElement('button');
-        addSubBtn.textContent = 'Add';
-        addSubBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium';
-        addSubBtn.onclick = () => {
-            if (subInput.value.trim()) {
-                addBacklogItem(subInput.value, item.id);
-                subInput.value = '';
-                subInputContainer.style.display = 'none';
-                if (collapsedBacklog.has(item.id)) collapsedBacklog.delete(item.id);
+        const years = [...new Set(s.archive.map(a => ymd(a)[0]))].sort((a, b) => b - a).map(y => ({
+            y,
+            count: s.archive.filter(a => ymd(a)[0] === y).length,
+            on: !!sc && sc.y === y && sc.m == null,
+            months: [...new Set(s.archive.filter(a => ymd(a)[0] === y).map(a => ymd(a)[1]))].sort((a, b) => b - a).map(m => ({
+                m,
+                l: MONTHS[m - 1],
+                count: s.archive.filter(a => { const [yy, mm] = ymd(a); return yy === y && mm === m; }).length,
+                on: !!sc && sc.y === y && sc.m === m
+            }))
+        }));
+        return {
+            arch: {
+                groups: [...gmap.values()],
+                years,
+                total: s.archive.length,
+                found: found.length,
+                scopeLabel: !sc ? 'All time' : sc.m == null ? String(sc.y) : `${MONTHS[sc.m - 1]} ${sc.y}`,
+                q: s.aq,
+                mode
             }
         };
-        
-        const cancelSubBtn = document.createElement('button');
-        cancelSubBtn.textContent = '×';
-        cancelSubBtn.className = 'bg-neutral-700 hover:bg-neutral-600 px-2 md:px-3 py-1.5 rounded-md font-medium text-lg';
-        cancelSubBtn.onclick = () => {
-            subInput.value = '';
-            subInputContainer.style.display = 'none';
-        };
-        
-        subInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && subInput.value.trim()) {
-                addBacklogItem(subInput.value, item.id);
-                subInput.value = '';
-                subInputContainer.style.display = 'none';
-                if (collapsedBacklog.has(item.id)) collapsedBacklog.delete(item.id);
-            }
-        });
-        
-        subInputContainer.appendChild(subInput);
-        subInputContainer.appendChild(addSubBtn);
-        subInputContainer.appendChild(cancelSubBtn);
-        
-        const addSubItemBtn = document.createElement('button');
-        addSubItemBtn.textContent = '+ Add sub-item';
-        addSubItemBtn.className = 'text-xs text-gray-500 hover:text-gray-400 mt-2';
-        addSubItemBtn.onclick = () => {
-            subInputContainer.style.display = 'flex';
-            subInput.focus();
-        };
-        
-        div.appendChild(addSubItemBtn);
-        div.appendChild(subInputContainer);
     }
-    
-    return div;
-}
-function renderTasks() {
-    taskList.innerHTML = '';
-    const today = getTodayDate();
-    
-    // Filter: show uncompleted OR completed today (hide completed from previous days)
-    const visibleTasks = tasks.filter(task => {
-        return !task.completed || task.completedDate === today;
-    });
-    
-    visibleTasks.forEach(task => {
-        const isCollapsed = collapsedTasks.has(task.id);
-        
-        // Create container for main task + its subtasks
-        const taskContainer = document.createElement('div');
-        taskContainer.className = 'task-container mb-2';
-        taskContainer.setAttribute('data-id', task.id);
-        
-        // Add main task
-        const mainTaskElement = createTaskElement(task, false, isCollapsed);
-        mainTaskElement.classList.remove('mb-2'); // Remove margin from main task
-        taskContainer.appendChild(mainTaskElement);
-        
-        // Add subtasks inside a subtasks container
-        if (task.subtasks && task.subtasks.length > 0 && !isCollapsed) {
-            const subtasksContainer = document.createElement('div');
-            subtasksContainer.className = 'subtasks-container';
-            subtasksContainer.setAttribute('data-parent-id', task.id);
-            
-            // Filter subtasks too
-            const visibleSubtasks = task.subtasks.filter(subtask => {
-                return !subtask.completed || subtask.completedDate === today;
-            });
-            
-            visibleSubtasks.forEach((subtask, index) => {
-                const isLast = index === visibleSubtasks.length - 1;
-                const subtaskElement = createTaskElement(subtask, true, false, task.id, isLast);
-                subtaskElement.setAttribute('data-id', subtask.id);
-                subtasksContainer.appendChild(subtaskElement);
-            });
-            
-            taskContainer.appendChild(subtasksContainer);
-        }
-        
-        taskList.appendChild(taskContainer);
-    });
-    
-    // Initialize drag and drop
-    initSortable();
+
+    render() {
+        const v = this.vals();
+        return v.device === 'mobile' ? renderMobile(this, v) : renderDesktop(this, v);
+    }
 }
 
-function initSortable() {
-    // Destroy existing sortable instances to prevent memory leak
-    if (taskListSortable) {
-        taskListSortable.destroy();
-        taskListSortable = null;
-    }
-    subtaskSortables.forEach(sortable => sortable.destroy());
-    subtaskSortables = [];
-
-    // Sortable for main tasks (store reference for cleanup)
-    taskListSortable = new Sortable(taskList, {
-        group: {
-            name: 'shared',
-            pull: true,
-            put: true
-        },
-        animation: 150,
-        handle: '.drag-handle',
-        ghostClass: 'sortable-ghost',
-        draggable: '.task-container',
-        onAdd: function(evt) {
-            // Item dragged from backlog to tasks
-            const id = evt.item.getAttribute('data-id');
-            const backlogItem = findBacklogItem(id);
-            
-            if (backlogItem) {
-                // Add to tasks with all subtasks
-                const newTask = {
-                    id: generateId(),
-                    text: backlogItem.text,
-                    completed: false,
-                    subtasks: backlogItem.subtasks ? backlogItem.subtasks.map(sub => ({
-                        id: generateId(),
-                        text: sub.text,
-                        completed: false,
-                        subtasks: [],
-                        parentId: null
-                    })) : []
-                };
-                
-                tasks.push(newTask);
-                saveTasks();
-                renderTasks();
-                
-                // Remove from backlog
-                deleteBacklogItem(id);
-                
-                // Remove the cloned element
-                evt.item.remove();
-            }
-        },
-        onEnd: function(evt) {
-            // Get new order from containers
-            const containers = Array.from(taskList.querySelectorAll('.task-container'));
-            const newOrder = [];
-            
-            containers.forEach(container => {
-                const id = container.getAttribute('data-id');
-                const task = tasks.find(t => t.id === id);
-                if (task) {
-                    newOrder.push(task);
-                }
-            });
-            
-            // Preserve completed tasks from previous days (hidden from view but still in storage)
-            const today = getTodayDate();
-            const hiddenCompletedTasks = tasks.filter(task => {
-                return task.completed && task.completedDate !== today;
-            });
-
-            // Merge reordered visible tasks with hidden completed tasks
-            tasks = [...newOrder, ...hiddenCompletedTasks];
-            saveTasks();
-        }
-    });
-    
-    // Sortable for subtasks within each parent (store references for cleanup)
-    const subtaskContainers = document.querySelectorAll('.subtasks-container');
-    subtaskContainers.forEach(container => {
-        const sortable = new Sortable(container, {
-            animation: 150,
-            handle: '.drag-handle',
-            ghostClass: 'sortable-ghost',
-            onEnd: function(evt) {
-                const parentId = container.getAttribute('data-parent-id');
-                const parentTask = tasks.find(t => t.id === parentId);
-                
-                if (parentTask) {
-                    // Get new subtask order
-                    const subtaskElements = Array.from(container.children);
-                    const newSubtaskOrder = [];
-                    
-                    subtaskElements.forEach(el => {
-                        const subtaskId = el.getAttribute('data-id');
-                        const subtask = parentTask.subtasks.find(s => s.id === subtaskId);
-                        if (subtask) {
-                            newSubtaskOrder.push(subtask);
-                        }
-                    });
-                    
-                    parentTask.subtasks = newSubtaskOrder;
-                    saveTasks();
-                    renderTasks(); // Re-render to update isLast margin classes
-                }
-            }
-        });
-        subtaskSortables.push(sortable);
-    });
-}
-
-function createTaskElement(task, isSubtask = false, isCollapsed = false, parentId = null, isLast = false) {
-    const div = document.createElement('div');
-    const completedClass = task.completed ? 'opacity-50' : '';
-    const subtaskClass = isSubtask 
-        ? (isLast ? 'border-l-2 border-neutral-700 ml-6 mt-2 mb-10 pl-4' : 'border-l-2 border-neutral-700 ml-6 mt-2 mb-2 pl-4')
-        : 'mb-2';
-    
-    div.className = `${completedClass} ${subtaskClass} bg-neutral-900 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700`;
-
-    const content = document.createElement('div');
-    content.className = 'grid items-center gap-3';
-    content.style.gridTemplateColumns = 'auto auto 1fr auto auto auto';
-    
-    // Drag handle (LEFT)
-    const dragHandle = document.createElement('div');
-    dragHandle.className = 'drag-handle text-gray-500 hover:text-gray-300 text-sm';
-    dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
-    
-    // Checkbox
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = task.completed;
-    checkbox.className = 'w-4 h-4 cursor-pointer accent-blue-600 rounded';
-    checkbox.onchange = () => toggleTask(task.id);
-    
-    // Text (inline editable)
-    const text = document.createElement('span');
-    text.className = task.completed ? 'line-through text-gray-600 text-sm cursor-text outline-none' : 'text-gray-300 text-sm cursor-text hover:text-white outline-none';
-    text.contentEditable = 'true';
-    text.textContent = task.text;
-    text.setAttribute('spellcheck', 'false');
-    
-    // Prevent newlines
-    text.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            text.blur();
-        }
-    });
-    
-    // Save on blur
-    text.addEventListener('blur', () => {
-        const newText = text.textContent.trim();
-        if (newText && newText !== task.text) {
-            task.text = newText;
-            saveTasks();
-        } else if (!newText) {
-            text.textContent = task.text; // Revert if empty
-        }
-    });
-    
-    // Right section - expand/collapse + send to backlog + trash
-    // Expand button (only for main tasks with subtasks)
-    let expandBtn;
-    if (!isSubtask && task.subtasks && task.subtasks.length > 0) {
-        expandBtn = document.createElement('button');
-        expandBtn.className = 'w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-300';
-        expandBtn.innerHTML = isCollapsed ? '<i class="fas fa-chevron-right"></i>' : '<i class="fas fa-chevron-down"></i>';
-        expandBtn.onclick = () => toggleCollapse(task.id);
-    } else {
-        // Empty div for consistent spacing
-        expandBtn = document.createElement('div');
-        expandBtn.className = 'w-0';
-    }
-    
-    // Send to Backlog button (only for main tasks)
-    let sendBacklogBtn;
-    if (!isSubtask) {
-        sendBacklogBtn = document.createElement('button');
-        sendBacklogBtn.className = 'bg-purple-600 hover:bg-purple-500 px-2 py-1.5 rounded-md text-white text-xs transition-colors';
-        sendBacklogBtn.innerHTML = '<i class="fas fa-arrow-right"></i>';
-        sendBacklogBtn.title = 'Send to Backlog';
-        sendBacklogBtn.onclick = () => moveTaskToBacklog(task.id);
-    } else {
-        sendBacklogBtn = document.createElement('div');
-        sendBacklogBtn.className = 'w-0';
-    }
-    
-    const delBtn = document.createElement('button');
-    delBtn.className = 'bg-rose-500 hover:bg-rose-400 px-2.5 py-1.5 rounded-md text-white text-xs transition-colors';
-    delBtn.innerHTML = '<i class="fas fa-trash"></i>';
-    delBtn.onclick = () => {
-        if (currentTaskId === task.id) {
-            stopTimer();
-            resetTimer();
-            currentTaskId = null;
-        }
-        deleteTask(task.id);
-    };
-    
-    content.appendChild(dragHandle);
-    content.appendChild(checkbox);
-    content.appendChild(text);
-    content.appendChild(expandBtn);
-    content.appendChild(sendBacklogBtn);
-    content.appendChild(delBtn);
-    div.appendChild(content);
-
-    // Subtask input (only for main tasks)
-    if (!isSubtask) {
-        const inputContainer = document.createElement('div');
-        inputContainer.className = 'flex gap-1 md:gap-2 mt-3 ml-6 md:ml-10';
-        inputContainer.style.display = 'none';
-        
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'Enter subtask...';
-        input.className = 'flex-1 bg-neutral-800 border border-neutral-700 px-2 md:px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm';
-        input.style.maxWidth = 'calc(100% - 80px)'; // Limit width on mobile to leave space for buttons
-        
-        const addBtn = document.createElement('button');
-        addBtn.textContent = 'Add';
-        addBtn.className = 'bg-blue-600 hover:bg-blue-700 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium';
-        addBtn.onclick = () => {
-            if (input.value.trim()) {
-                addTask(input.value, task.id);
-                input.value = '';
-                inputContainer.style.display = 'none';
-                if (collapsedTasks.has(task.id)) collapsedTasks.delete(task.id);
-            }
-        };
-        
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = '×';
-        cancelBtn.className = 'bg-neutral-800 hover:bg-neutral-700 px-2.5 py-1.5 rounded-md text-white text-xs transition-colors flex items-center justify-center';
-        cancelBtn.style.minWidth = '32px';
-        cancelBtn.style.minHeight = '32px';
-        cancelBtn.style.fontSize = '20px';
-        cancelBtn.style.lineHeight = '1';
-        cancelBtn.onclick = () => {
-            input.value = '';
-            inputContainer.style.display = 'none';
-        };
-        
-        input.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && input.value.trim()) {
-                addTask(input.value, task.id);
-                input.value = '';
-                inputContainer.style.display = 'none';
-                if (collapsedTasks.has(task.id)) collapsedTasks.delete(task.id);
-            }
-        });
-        
-        inputContainer.appendChild(input);
-        inputContainer.appendChild(addBtn);
-        inputContainer.appendChild(cancelBtn);
-        
-        const addSubBtn = document.createElement('button');
-        addSubBtn.textContent = '+ Add subtask';
-        addSubBtn.className = 'text-xs text-gray-500 hover:text-gray-400 ml-10 mt-2';
-        addSubBtn.onclick = () => {
-            inputContainer.style.display = 'flex';
-            input.focus();
-        };
-        
-        div.appendChild(addSubBtn);
-        div.appendChild(inputContainer);
-    }
-
-    return div;
-}
-
-// Events
-addTaskBtn.addEventListener('click', () => {
-    addTask(taskInput.value);
-    taskInput.value = '';
-});
-
-taskInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        addTask(taskInput.value);
-        taskInput.value = '';
-    }
-});
-
-startBtn.addEventListener('click', () => startTimer());
-stopBtn.addEventListener('click', () => stopTimer());
-resetBtn.addEventListener('click', resetTimer);
-
-break5Btn.addEventListener('click', () => startBreak(5));
-break15Btn.addEventListener('click', () => startBreak(15));
-skipBreakBtn.addEventListener('click', skipBreak);
-cancelBreakBtn.addEventListener('click', cancelBreak);
-
-// Backlog events
-backlogToggle.addEventListener('click', toggleBacklogSidebar);
-closeBacklog.addEventListener('click', toggleBacklogSidebar);
-backlogOverlay.addEventListener('click', toggleBacklogSidebar);
-
-// Calendar events
-calendarToggle.addEventListener('click', toggleCalendarSidebar);
-closeCalendar.addEventListener('click', toggleCalendarSidebar);
-calendarOverlay.addEventListener('click', toggleCalendarSidebar);
-prevMonth.addEventListener('click', () => navigateMonth(-1));
-nextMonth.addEventListener('click', () => navigateMonth(1));
-
-// Archive events
-archiveToggle.addEventListener('click', toggleArchiveSidebar);
-closeArchive.addEventListener('click', toggleArchiveSidebar);
-archiveOverlay.addEventListener('click', toggleArchiveSidebar);
-
-// Mobile menu events
-mobileMenuToggle.addEventListener('click', toggleMobileMenu);
-
-mobileCalendar.addEventListener('click', () => {
-    closeMobileMenu();
-    toggleCalendarSidebar();
-});
-
-mobileArchive.addEventListener('click', () => {
-    closeMobileMenu();
-    toggleArchiveSidebar();
-});
-
-mobileBacklog.addEventListener('click', () => {
-    closeMobileMenu();
-    toggleBacklogSidebar();
-});
-
-addBacklogBtn.addEventListener('click', () => {
-    addBacklogItem(backlogInput.value);
-    backlogInput.value = '';
-});
-
-backlogInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        addBacklogItem(backlogInput.value);
-        backlogInput.value = '';
-    }
-});
-
-// Close mobile menu when clicking outside
-document.addEventListener('click', (e) => {
-    if (!mobileMenuToggle.contains(e.target) && !mobileMenuDropdown.contains(e.target)) {
-        closeMobileMenu();
-    }
-});
-
-// Notification events
-notificationClose.addEventListener('click', hideNotification);
-notificationModal.addEventListener('click', (e) => {
-    // Close if clicking outside the modal content
-    if (e.target === notificationModal || e.target.classList.contains('bg-black/60')) {
-        hideNotification();
-    }
-});
-
-// Keyboard support - ESC to close notification
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !notificationModal.classList.contains('hidden')) {
-        hideNotification();
-    }
-});
-
-// Settings events
-settingsToggle.addEventListener('click', toggleSettingsSidebar);
-closeSettings.addEventListener('click', toggleSettingsSidebar);
-settingsOverlay.addEventListener('click', toggleSettingsSidebar);
-
-timezoneSelect.addEventListener('change', (e) => {
-    saveTimezone(e.target.value);
-});
-
-mobileSettings.addEventListener('click', () => {
-    closeMobileMenu();
-    toggleSettingsSidebar();
-});
-
-// Cross-tab sync via storage event
-window.addEventListener('storage', (e) => {
-    if (e.key === 'noxcuse_timer') {
-        syncTimerState(e.newValue ? JSON.parse(e.newValue) : null);
-    }
-    if (e.key === 'noxcuse_daily_sessions') {
-        cachedDailySessions = null;
-        loadDailySessions();
-        updateSessionsDisplay();
-    }
-});
-
-// Full sync when tab becomes visible (fallback for storage event)
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-
-    syncTimerState(JSON.parse(localStorage.getItem('noxcuse_timer')));
-
-    cachedDailySessions = null;
-    loadDailySessions();
-    updateSessionsDisplay();
-});
-
-// Init
-loadDailySessions();
-renderTasks();
-renderBacklog();
-updateTimerDisplay();
-updateSessionsDisplay();
-restoreTimer();
+render(h(App), document.getElementById('app'));

@@ -2,273 +2,32 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="No excuse. Or fail. A focused Pomodoro timer with tasks, backlog, calendar and archive.">
+    <meta name="theme-color" content="#0e0f11">
     <title>NoXcuse</title>
     <link rel="icon" type="image/png" href="assets/icons/NoXcuse.png">
-    
-    <!-- Tailwind CSS (build dengan: ./tailwindcss -i css/input.css -o css/output.css --minify) -->
+
+    <!-- Pick the theme before first paint (no flash) -->
+    <script>
+        (function () {
+            var theme = 'system';
+            try { theme = (JSON.parse(localStorage.getItem('nx.cfg')) || {}).theme || 'system'; } catch (e) {}
+            var dark = theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+
+    <!-- Built with: ./tailwindcss -i css/input.css -o css/output.css --minify -->
     <link rel="stylesheet" href="css/output.css">
-    
-    <!-- External Libraries -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
-<body class="text-gray-200 min-h-screen p-6 md:p-8">
-    <div class="max-w-3xl mx-auto relative">
-
-        <header class="mb-12">
-            <h1 class="text-3xl font-bold mb-2 text-white">NoXcuse</h1>
-            <p class="text-gray-500 text-sm">No excuse. Or fail.</p>
-        </header>
-
-        <!-- Calendar Toggle Button (fixed on left - desktop only) -->
-        <button id="calendarToggle" class="hidden lg:flex fixed top-6 left-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-calendar text-gray-400"></i>
-        </button>
-
-        <!-- Archive Toggle Button (next to calendar - desktop only) -->
-        <button id="archiveToggle" class="hidden lg:flex fixed top-6 left-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-archive text-gray-400"></i>
-        </button>
-
-        <!-- Mobile Menu Button (mobile only) -->
-        <button id="mobileMenuToggle" class="flex lg:hidden absolute -top-2 right-0 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-bars text-gray-400"></i>
-        </button>
-
-        <!-- Mobile Menu Dropdown -->
-        <div id="mobileMenuDropdown" class="hidden absolute z-50 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl w-48">
-            <button id="mobileCalendar" class="w-full px-4 py-3 text-left text-gray-300 hover:bg-neutral-700 flex items-center gap-3 transition-colors">
-                <i class="fas fa-calendar text-gray-400 w-4"></i>
-                <span>Calendar</span>
-            </button>
-            <button id="mobileArchive" class="w-full px-4 py-3 text-left text-gray-300 hover:bg-neutral-700 flex items-center gap-3 transition-colors border-t border-neutral-700">
-                <i class="fas fa-archive text-gray-400 w-4"></i>
-                <span>Archive</span>
-            </button>
-            <button id="mobileBacklog" class="w-full px-4 py-3 text-left text-gray-300 hover:bg-neutral-700 flex items-center gap-3 transition-colors border-t border-neutral-700">
-                <i class="fas fa-list text-gray-400 w-4"></i>
-                <span>Backlog</span>
-            </button>
-            <button id="mobileSettings" class="w-full px-4 py-3 text-left text-gray-300 hover:bg-neutral-700 flex items-center gap-3 transition-colors border-t border-neutral-700">
-                <i class="fas fa-cog text-gray-400 w-4"></i>
-                <span>Settings</span>
-            </button>
-        </div>
-
-        <!-- Calendar Sidebar -->
-        <div id="calendarSidebar" class="fixed top-0 left-0 h-full w-full md:w-[400px] bg-neutral-900 border-r border-neutral-800 transform -translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
-            <div class="p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-white">Session History</h2>
-                    <button id="closeCalendar" class="text-gray-500 hover:text-gray-300 p-2 -mr-2">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Calendar Navigation -->
-                <div class="flex items-center justify-between mb-4">
-                    <button id="prevMonth" class="text-gray-400 hover:text-white p-2">
-                        <i class="fas fa-chevron-left"></i>
-                    </button>
-                    <h3 id="currentMonth" class="text-lg font-semibold text-white"></h3>
-                    <button id="nextMonth" class="text-gray-400 hover:text-white p-2">
-                        <i class="fas fa-chevron-right"></i>
-                    </button>
-                </div>
-
-                <!-- Calendar Grid -->
-                <div class="mb-6">
-                    <!-- Weekday headers -->
-                    <div class="grid grid-cols-7 gap-1 mb-2">
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Su</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Mo</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Tu</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">We</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Th</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Fr</div>
-                        <div class="text-center text-xs font-medium text-gray-500 py-2">Sa</div>
-                    </div>
-                    <!-- Calendar dates -->
-                    <div id="calendarDates" class="grid grid-cols-7 gap-1"></div>
-                </div>
-
-                <!-- Selected Date Details -->
-                <div id="dateDetails" class="bg-neutral-800 border border-neutral-700 rounded-lg p-4" style="display: none;">
-                    <div class="flex items-center justify-between mb-3">
-                        <h4 id="selectedDate" class="font-semibold text-white"></h4>
-                        <span id="sessionCount" class="text-sm text-gray-400"></span>
-                    </div>
-                    <div id="sessionDots" class="flex gap-1 flex-wrap mb-4"></div>
-                    
-                    <!-- Completed Tasks for Selected Date -->
-                    <div id="dateTasksSection" style="display: none;">
-                        <hr class="border-neutral-700 mb-3">
-                        <h5 class="text-sm font-semibold text-gray-400 mb-2">Completed Tasks:</h5>
-                        <div id="dateTasks" class="space-y-1"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Overlay when calendar is open -->
-        <div id="calendarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
-
-        <!-- Archive Sidebar -->
-        <div id="archiveSidebar" class="fixed top-0 left-0 h-full w-full md:w-[400px] bg-neutral-900 border-r border-neutral-800 transform -translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
-            <div class="p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-white">Archive</h2>
-                    <button id="closeArchive" class="text-gray-500 hover:text-gray-300 p-2 -mr-2">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Archive List (grouped by date) -->
-                <div id="archiveList"></div>
-            </div>
-        </div>
-
-        <!-- Overlay when archive is open -->
-        <div id="archiveOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
-
-        <!-- Settings Toggle Button (fixed on right - desktop only) -->
-        <button id="settingsToggle" class="hidden lg:flex fixed top-6 right-20 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-cog text-gray-400"></i>
-        </button>
-
-        <!-- Backlog Toggle Button (fixed on right - desktop only) -->
-        <button id="backlogToggle" class="hidden lg:flex fixed top-6 right-6 z-50 bg-neutral-800 hover:bg-neutral-700 w-10 h-10 items-center justify-center rounded-lg border border-neutral-700 transition-all">
-            <i class="fas fa-bars text-gray-400"></i>
-        </button>
-
-        <!-- Backlog Sidebar -->
-        <div id="backlogSidebar" class="fixed top-0 right-0 h-full w-full md:w-[400px] bg-neutral-900 border-l border-neutral-800 transform translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
-            <div class="p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-white">Backlog</h2>
-                    <button id="closeBacklog" class="text-gray-500 hover:text-gray-300 p-2 -mr-2">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Add Backlog Input -->
-                <div class="mb-6">
-                    <div class="flex gap-2">
-                        <input 
-                            type="text" 
-                            id="backlogInput" 
-                            placeholder="Add to backlog..." 
-                            class="flex-1 bg-neutral-800 border border-neutral-700 px-3 py-2 rounded-md text-gray-200 placeholder-gray-500 text-sm"
-                        />
-                        <button id="addBacklogBtn" class="bg-blue-600 hover:bg-blue-700 px-2 md:px-4 py-2 rounded-md text-sm font-medium">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Backlog List -->
-                <div id="backlogList" class="space-y-2"></div>
-            </div>
-        </div>
-
-        <!-- Overlay when sidebar is open -->
-        <div id="backlogOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
-
-        <!-- Settings Sidebar -->
-        <div id="settingsSidebar" class="fixed top-0 right-0 h-full w-full md:w-[400px] bg-neutral-900 border-l border-neutral-800 transform translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto">
-            <div class="p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-white">Settings</h2>
-                    <button id="closeSettings" class="text-gray-500 hover:text-gray-300 p-2 -mr-2">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Timezone Setting -->
-                <div class="bg-neutral-800 border border-neutral-700 rounded-lg p-4">
-                    <div class="flex items-center gap-3 mb-3">
-                        <div class="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-globe text-blue-400"></i>
-                        </div>
-                        <div>
-                            <h3 class="font-semibold text-white">Timezone</h3>
-                            <p class="text-xs text-gray-500">Set your local timezone for date tracking</p>
-                        </div>
-                    </div>
-                    <select id="timezoneSelect" class="w-full bg-neutral-900 border border-neutral-600 rounded-lg px-4 py-3 text-gray-200 text-sm focus:border-blue-500 focus:outline-none cursor-pointer appearance-none" style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%236b7280%22 stroke-width=%222%22%3E%3Cpolyline points=%226,9 12,15 18,9%22%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px;">
-                        <option value="">Loading timezones...</option>
-                    </select>
-                    <p id="currentTimeDisplay" class="text-xs text-gray-500 mt-2"></p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Overlay when settings is open -->
-        <div id="settingsOverlay" class="fixed inset-0 bg-black/50 z-30 hidden"></div>
-
-        <!-- Custom Notification Modal -->
-        <div id="notificationModal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
-            <div class="bg-black/60 absolute inset-0"></div>
-            <div class="bg-neutral-900 border-2 border-neutral-700 rounded-xl p-8 max-w-md w-full mx-4 relative z-10 shadow-2xl">
-                <div class="text-center">
-                    <div id="notificationIcon" class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center">
-                        <i class="fas fa-bell text-3xl"></i>
-                    </div>
-                    <h3 id="notificationTitle" class="text-2xl font-bold mb-3 text-white"></h3>
-                    <p id="notificationMessage" class="text-gray-400 mb-6"></p>
-                    <button id="notificationClose" class="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg text-sm font-medium w-full transition-colors">
-                        OK
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Audio element -->
-        <audio id="notificationSound" preload="auto">
-            <source src="assets/audio/bell-notification.mp3" type="audio/mpeg">
-        </audio>
-
-        <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-8 mb-8">
-            <div class="text-center">
-                <div id="timer" class="mono text-6xl font-semibold mb-8 text-white">25:00</div>
-                
-                <!-- Timer Controls (during pomodoro) -->
-                <div id="timerControls" class="flex gap-3 justify-center mb-6">
-                    <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2.5 rounded-md text-sm font-medium">Start</button>
-                    <button id="stopBtn" class="bg-neutral-800 px-6 py-2.5 rounded-md text-sm font-medium opacity-50" disabled>Stop</button>
-                    <button id="resetBtn" class="bg-neutral-800 hover:bg-neutral-700 px-6 py-2.5 rounded-md text-sm font-medium">Reset</button>
-                </div>
-
-                <!-- Break Buttons (shown after pomodoro complete) -->
-                <div id="breakButtons" class="gap-3 justify-center mb-6" style="display: none;">
-                    <button id="break5Btn" class="bg-green-600 hover:bg-green-700 px-6 py-2.5 rounded-md text-sm font-medium">Break 5 min</button>
-                    <button id="break15Btn" class="bg-purple-600 hover:bg-purple-700 px-6 py-2.5 rounded-md text-sm font-medium">Break 15 min</button>
-                    <button id="skipBreakBtn" class="bg-neutral-700 hover:bg-neutral-600 px-6 py-2.5 rounded-md text-sm font-medium">Skip Break</button>
-                </div>
-
-                <!-- Cancel Break Button (shown during break) -->
-                <div id="cancelBreakContainer" class="flex gap-3 justify-center mb-6" style="display: none;">
-                    <button id="cancelBreakBtn" class="bg-yellow-500 hover:bg-yellow-400 px-8 py-2.5 rounded-md text-sm font-medium text-gray-900 hover:text-black">Cancel Break</button>
-                </div>
-
-                <div id="sessions" class="flex gap-2 justify-center flex-wrap max-w-md mx-auto"></div>
-            </div>
-        </div>
-
-        <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-5 mb-8">
-            <div class="flex gap-2 md:gap-3">
-                <input type="text" id="taskInput" placeholder="Add new task..." 
-                    class="flex-1 bg-neutral-800 border border-neutral-700 px-4 py-2.5 rounded-md text-gray-200 placeholder-gray-500 text-sm"/>
-                <button id="addTaskBtn" class="bg-blue-600 hover:bg-blue-700 px-3 md:px-6 py-2.5 rounded-md text-sm font-medium">Add</button>
-            </div>
-        </div>
-
-        <div id="taskList"></div>
-    </div>
-
-    <!-- JavaScript -->
-    <script src="js/app.js"></script>
+<body>
+    <div id="app"></div>
+    <noscript>NoXcuse needs JavaScript to run.</noscript>
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
