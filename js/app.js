@@ -293,11 +293,28 @@ class App extends Component {
         ]);
     };
 
+    // Done tasks sink to the bottom; un-done tasks rejoin the end of the open list.
     toggleTask = id => {
         const now = Date.now();
         const day = this.today();
-        this.setTasks(list => list.map(t => t.id !== id ? t
-            : t.done ? { ...t, done: false, doneAt: null, day: null } : { ...t, done: true, doneAt: now, day }));
+        this.setTasks(list => {
+            const t = list.find(x => x.id === id);
+            if (!t) return list;
+            const rest = list.filter(x => x.id !== id);
+            if (!t.done) return [...rest, { ...t, done: true, doneAt: now, day }];
+            return [...rest.filter(x => !x.done), { ...t, done: false, doneAt: null, day: null }, ...rest.filter(x => x.done)];
+        });
+    };
+
+    // Make a queued task the current ("now") one. A running session follows the switch.
+    makeNow = id => {
+        this.setState({ drag: null });
+        this.setTasks(list => {
+            const it = list.find(t => t.id === id);
+            return it ? [it, ...list.filter(t => t.id !== id)] : list;
+        });
+        const t = this.state.timer;
+        if (t && t.mode === 'focus' && (t.status === 'running' || t.status === 'paused')) this.setTimer({ ...t, taskId: id });
     };
 
     removeTask = id => {

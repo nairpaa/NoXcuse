@@ -63,7 +63,11 @@ function timerPage(a, v) {
                 </div>
                 ${controls(a, v)}
             </div>
-            <aside class="panel tp-panel">${v.nowTask ? nowPanel(a, v) : emptyPanel(a, v)}</aside>
+            <aside class="panel tp-panel" onDragOver=${e => {
+                // dragged back out of the NOW block: drop the highlight
+                if (e.target.closest && e.target.closest('.now-drop')) return;
+                a.setState(st => (st.drag && st.drag.over === 'now' ? { drag: { ...st.drag, over: null } } : null));
+            }}>${v.nowTask ? nowPanel(a, v) : emptyPanel(a, v)}</aside>
         </section>`;
 }
 
@@ -94,8 +98,20 @@ function nowPanel(a, v) {
     const editingTitle = !!ed && ed.id === t.id && ed.sub == null;
     const done = t.subs.filter(x => x.done).length;
     const pct = t.subs.length ? Math.round((done / t.subs.length) * 100) : 0;
+    const drag = s.drag;
+    const dropping = !!drag && !!drag.id && drag.id !== t.id;
+    const overNow = e => {
+        const d = a.state.drag;
+        if (!d || !d.id || d.id === t.id) return;
+        e.preventDefault();
+        if (d.over !== 'now') a.setState({ drag: { ...d, over: 'now' } });
+    };
+    const open = v.tasks.filter(x => x !== t && !x.done);
+    const finished = v.tasks.filter(x => x.done);
     return html`
-        <div class="cap acc spread">${v.focus ? 'NOW' : 'AFTER THIS BREAK'}<span class="muted">${v.spentOf(t.id)} SESSIONS SPENT</span></div>
+        <div class=${cx('now-drop', dropping && drag.over === 'now' && 'over')} onDragEnter=${overNow} onDragOver=${overNow}
+            onDrop=${e => { e.preventDefault(); const d = a.state.drag; if (d && d.id && d.id !== t.id) a.makeNow(d.id); }}>
+        <div class="cap acc spread">${dropping && drag.over === 'now' ? 'DROP TO FOCUS ON THIS NOW' : v.focus ? 'NOW' : 'AFTER THIS BREAK'}<span class="muted">${v.spentOf(t.id)} SESSIONS SPENT</span></div>
         ${editingTitle ? html`
             <div class="now-edit" onFocusOut=${editGroup(a)}>
                 ${editInput(a, v, 'big', 'Task title')}
@@ -104,9 +120,11 @@ function nowPanel(a, v) {
             </div>
             <div class="hint">ENTER SAVE · ESC CANCEL</div>` : html`
             <div class="now-row">
+                <button class="chk lg now-chk" role="checkbox" aria-checked="false" title="Mark done" aria-label=${`Mark “${t.title}” done`} onClick=${() => a.toggleTask(t.id)}></button>
                 <div class="now-title" ...${editable(() => a.startEdit(t.id, null, t.title))}>${t.title}</div>
                 <button class="icon-btn" title="Edit task" aria-label="Edit task" onClick=${() => a.startEdit(t.id, null, t.title)}>${icon('pencil', 14)}</button>
             </div>`}
+        </div>
         <div class="subhead">
             <span>${t.subs.length ? `SUBTASKS · ${done}/${t.subs.length}` : 'SUBTASKS'}</span>
             <div class="bar"><i style=${`width:${pct}%`}></i></div>
@@ -115,8 +133,14 @@ function nowPanel(a, v) {
             ${t.subs.map(x => subRow(a, v, t, x, 'now'))}
             ${subAdd(a, v, t, 'now')}
         </div>
-        <div class="upnext spread"><span class="cap muted">UP NEXT</span>${v.doneCount ? archiveLink(a, v) : null}</div>
-        <div class="queue">${v.tasks.filter(x => x !== t).map(x => queueRow(a, v, x))}</div>
+        <div class="upnext spread"><span class="cap muted">UP NEXT</span></div>
+        <div class="queue">
+            ${open.map(x => queueRow(a, v, x))}
+            ${open.length ? null : html`<div class="q-empty">Nothing queued. Add a task below.</div>`}
+            ${finished.length ? html`
+                <div class="done-head spread"><span class="cap muted">DONE · ${finished.length}</span>${archiveLink(a, v)}</div>
+                ${finished.map(x => queueRow(a, v, x))}` : null}
+        </div>
         <div class="addbar"><span class="addbar-plus">+</span>${addField(a, v, '', 'Add task')}<kbd>↵</kbd></div>`;
 }
 
@@ -128,21 +152,21 @@ function queueRow(a, v, t) {
     const done = t.subs.filter(x => x.done).length;
     const drag = s.drag;
     let line = '';
-    if (drag && drag.over === t.id && drag.id !== t.id) {
+    if (drag && drag.over === t.id && drag.id !== t.id && !t.done) {
         const from = v.tasks.findIndex(x => x.id === drag.id);
         const to = v.tasks.findIndex(x => x.id === t.id);
         line = from > to ? 'line-top' : 'line-bot';
     }
     return html`
         <div class=${cx('q', t.done && 'done', drag && drag.id === t.id && 'dragging', line)}
-            draggable=${!!drag && drag.armed === t.id && !editing}
+            draggable=${!!drag && drag.armed === t.id && !editing && !t.done}
             onDragStart=${e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); a.setState({ drag: { id: t.id, over: null, armed: t.id } }); }}
-            onDragOver=${e => { const d = a.state.drag; if (!d || !d.id) return; e.preventDefault(); if (d.over !== t.id) a.setState({ drag: { ...d, over: t.id } }); }}
-            onDrop=${e => { e.preventDefault(); const d = a.state.drag; if (d && d.id) a.moveTask(d.id, t.id); }}
+            onDragOver=${e => { const d = a.state.drag; if (!d || !d.id || t.done) return; e.preventDefault(); if (d.over !== t.id) a.setState({ drag: { ...d, over: t.id } }); }}
+            onDrop=${e => { e.preventDefault(); const d = a.state.drag; if (d && d.id && !t.done) a.moveTask(d.id, t.id); }}
             onDragEnd=${() => a.setState({ drag: null })}>
             <div class="q-row">
-                <span class="grip" title="Drag to reorder" onPointerDown=${() => a.setState({ drag: { armed: t.id } })}
-                    onPointerUp=${() => { if (a.state.drag && !a.state.drag.id) a.setState({ drag: null }); }}>${icon('grip', 14)}</span>
+                ${t.done ? html`<span></span>` : html`<span class="grip" title="Drag to reorder (or onto NOW)" onPointerDown=${() => a.setState({ drag: { armed: t.id } })}
+                    onPointerUp=${() => { if (a.state.drag && !a.state.drag.id) a.setState({ drag: null }); }}>${icon('grip', 14)}</span>`}
                 <button class=${cx('chev', t.subs.length && 'has', exp && 'open')} aria-label=${exp ? 'Collapse subtasks' : 'Expand subtasks'} aria-expanded=${exp}
                     onClick=${() => a.setState(x => ({ expanded: { ...x.expanded, [t.id]: !x.expanded[t.id] } }))}>${icon('chevronRight', 14)}</button>
                 <button class=${cx('chk', t.done && 'on')} role="checkbox" aria-checked=${t.done} aria-label=${t.title} onClick=${() => a.toggleTask(t.id)}>${t.done ? '✓' : ''}</button>
@@ -156,6 +180,7 @@ function queueRow(a, v, t) {
                 <div class="q-meta">
                     ${t.subs.length ? html`<div class="mini"><i style=${`width:${Math.round((done / t.subs.length) * 100)}%`}></i></div>` : null}
                     <span>${t.subs.length ? `${done}/${t.subs.length}` : ''}</span>
+                    ${t.done || editing ? null : html`<button class="q-now" title="Focus on this now" aria-label=${`Focus on “${t.title}” now`} onClick=${() => a.makeNow(t.id)}>${icon('arrowUpToLine', 13)}</button>`}
                 </div>
             </div>
             ${exp ? html`

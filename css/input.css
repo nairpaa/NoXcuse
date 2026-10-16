@@ -356,6 +356,9 @@ kbd {
 }
 
 .now-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
+.now-chk { margin-top: 3px; margin-right: 2px; }
+.now-drop { border-radius: 8px; transition: background 0.15s ease, outline-color 0.15s ease; outline: 1px dashed transparent; outline-offset: 6px; }
+.now-drop.over { background: var(--accent-soft); outline-color: var(--accent); }
 .now-title {
     flex: 1;
     font-size: 20px;
@@ -563,6 +566,22 @@ kbd {
 .q-edit { display: flex; gap: 4px; align-items: center; min-width: 0; }
 .q-meta { display: flex; align-items: center; gap: 6px; }
 .q-meta span { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--muted); }
+.q-now {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    opacity: 0;
+    transition: all 0.18s ease;
+}
+.q:hover .q-now, .q-now:focus-visible { opacity: 1; }
+.q-now:hover { color: var(--accent); background: var(--accent-soft); }
+@media (hover: none) { .q-now { opacity: 1; } }
+.done-head { margin-top: 18px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.q-empty { font-size: 13px; color: var(--muted); padding: 12px 0; }
 .mini { width: 28px; height: 3px; border-radius: 2px; background: var(--track); position: relative; }
 .mini i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--dim); }
 .q-subs {
