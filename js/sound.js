@@ -67,7 +67,7 @@ export async function requestNotify() {
 export function notify(title, body) {
     if (!notifySupported() || Notification.permission !== 'granted') return;
     try {
-        const n = new Notification(title, { body, icon: 'assets/icons/NoXcuse.png', tag: 'noxcuse', renotify: true });
+        const n = new Notification(title, { body, icon: 'assets/icons/icon-192.png', tag: 'noxcuse', renotify: true });
         n.onclick = () => {
             window.focus();
             n.close();
